@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonasross/canopy/aggregator"
 )
@@ -24,6 +25,11 @@ type UpdateMsg aggregator.Update
 // Model is the root bubbletea model. Update is pure: I/O lives in Run.
 type Model struct {
 	refresher Refresher
+
+	repo string
+
+	width  int
+	height int
 
 	ordered []string
 	states  map[string]aggregator.WorktreeState
@@ -45,6 +51,7 @@ func NewModel(r Refresher) tea.Model {
 	ti.Prompt = filterPrompt
 	return Model{
 		refresher:   r,
+		width:       80,
 		states:      make(map[string]aggregator.WorktreeState),
 		filterInput: ti,
 		footer:      footerHelp,
@@ -59,12 +66,21 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
 	case UpdateMsg:
 		u := aggregator.Update(msg)
 		if _, exists := m.states[u.Worktree]; !exists {
 			m.ordered = append(m.ordered, u.Worktree)
 		}
 		m.states[u.Worktree] = u.State
+		// Derive repo name from the first incoming update.
+		if m.repo == "" && u.State.Repo.Name != "" {
+			m.repo = u.State.Repo.Name
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -159,26 +175,69 @@ func (m Model) moveFocus(delta int) Model {
 
 func (m Model) View() string {
 	now := m.now()
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
 
 	var sb strings.Builder
 
-	sb.WriteString(dimStyle.Render("[ops]"))
+	sb.WriteString(m.renderTitleBar(width))
 	sb.WriteString("\n\n")
 
-	filter := m.filterStr
-	if m.filtering {
-		filter = m.filterInput.Value()
-	}
-	sb.WriteString(renderWorktreeList(m.ordered, m.states, m.focusIndex, filter, now))
+	sb.WriteString(renderWorktreeList(m.ordered, m.states, m.focusIndex, m.activeFilter(), now))
 	sb.WriteString("\n\n")
 
-	if m.filtering {
-		sb.WriteString(m.filterInput.View())
-	} else {
-		sb.WriteString(dimStyle.Render(m.footer))
-	}
+	sb.WriteString(m.renderFooter(width))
 
 	return sb.String()
+}
+
+func (m Model) activeFilter() string {
+	if m.filtering {
+		return m.filterInput.Value()
+	}
+	return m.filterStr
+}
+
+func (m Model) renderTitleBar(width int) string {
+	// "── Canopy · <repo> ─────────────── ops ──"
+	left := " " + titleStyle.Render("Canopy")
+	if m.repo != "" {
+		left += " " + ruleStyle.Render("·") + " " + repoStyle.Render(m.repo)
+	}
+	right := tabActive.Render("ops") + " " + tabFaded.Render("·") + " " + tabFaded.Render("forensics") + " "
+
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	fill := width - leftW - rightW - 2
+	if fill < 1 {
+		fill = 1
+	}
+	return ruleStyle.Render("──") + left + " " + ruleStyle.Render(strings.Repeat("─", fill)) + " " + right + ruleStyle.Render("──")
+}
+
+func (m Model) renderFooter(width int) string {
+	if m.filtering {
+		return "  " + m.filterInput.View()
+	}
+	// Transient footer set by f/tab.
+	if m.footer != footerHelp {
+		return "  " + dimStyle.Render(m.footer)
+	}
+	// Default styled help footer.
+	var chunks []string
+	for _, b := range footerKeys {
+		chunks = append(chunks, keyStyle.Render(b.key)+" "+keyDescStyle.Render(b.desc))
+	}
+	help := strings.Join(chunks, "  "+keyDescStyle.Render("·")+"  ")
+
+	helpW := lipgloss.Width(help)
+	fill := width - helpW - 4
+	if fill < 1 {
+		fill = 1
+	}
+	return "  " + help + " " + ruleStyle.Render(strings.Repeat("─", fill)) + "  "
 }
 
 // Run constructs the bubbletea program, bridges aggregator updates into it,
@@ -196,6 +255,8 @@ func Run(ctx context.Context, agg *aggregator.Aggregator) error {
 		for u := range ch {
 			p.Send(UpdateMsg(u))
 		}
+		// Channel closed (ctx done or agg closed) — exit the program.
+		// Safe no-op if the user already pressed q.
 		p.Quit()
 	}()
 

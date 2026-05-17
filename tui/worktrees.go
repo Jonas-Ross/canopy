@@ -4,8 +4,18 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonasross/canopy/aggregator"
+)
+
+const (
+	branchColMin = 24
+	branchColMax = 50
+	statusColW   = 12
+	ageColW      = 6
 )
 
 // FormatRelativeTime returns "now" / "Xm" / "Xh" / "Xd"; zero when returns "-".
@@ -55,36 +65,87 @@ func FormatBranch(branch string, detached bool) string {
 	return branch
 }
 
-func renderRow(state aggregator.WorktreeState, branch string, focused bool, now time.Time) string {
+func truncate(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max-1]) + "…"
+}
+
+// renderStatus renders the dirty + ahead/behind cluster with per-segment color.
+func renderStatus(dirtyFiles, ahead, behind int, hasUpstream bool) string {
+	var parts []string
+	if dirtyFiles > 0 {
+		parts = append(parts, dirtyStyle.Render(fmt.Sprintf("~%d", dirtyFiles)))
+	}
+	if hasUpstream {
+		switch {
+		case ahead == 0 && behind == 0:
+			parts = append(parts, syncStyle.Render("="))
+		default:
+			var ab strings.Builder
+			if ahead > 0 {
+				ab.WriteString(aheadStyle.Render(fmt.Sprintf("↑%d", ahead)))
+			}
+			if behind > 0 {
+				if ab.Len() > 0 {
+					ab.WriteString(" ")
+				}
+				ab.WriteString(behindStyle.Render(fmt.Sprintf("↓%d", behind)))
+			}
+			parts = append(parts, ab.String())
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func renderRow(state aggregator.WorktreeState, branch string, focused bool, now time.Time, branchColW int) string {
 	wt := state.Worktree
-	var sb strings.Builder
 
-	sb.WriteString(branch)
-
-	if wt.DirtyFiles > 0 {
-		sb.WriteString(fmt.Sprintf("  ~%d", wt.DirtyFiles))
-	}
-
-	if ab := FormatAheadBehind(wt.Ahead, wt.Behind, wt.HasUpstream); ab != "" {
-		sb.WriteString("  ")
-		sb.WriteString(ab)
-	}
-
-	sb.WriteString("  ")
-	sb.WriteString(FormatRelativeTime(wt.LastCommit.When, now))
-
-	if state.Live != nil {
-		sb.WriteString("  ")
-		sb.WriteString(liveStyle.Render("●"))
-		sb.WriteString(" ")
-		sb.WriteString(state.Live.Model)
-	}
-
-	row := sb.String()
+	cursor := "   "
 	if focused {
-		return focusedStyle.Render(row)
+		cursor = focusCursor.Render(" ▍ ")
 	}
-	return row
+
+	branchText := truncate(branch, branchColW)
+	var branchCol string
+	switch {
+	case wt.Detached:
+		branchCol = lipgloss.NewStyle().Width(branchColW).Inherit(detachedStyle).Render(branchText)
+	case focused:
+		branchCol = lipgloss.NewStyle().Width(branchColW).Inherit(focusedBranch).Render(branchText)
+	default:
+		branchCol = lipgloss.NewStyle().Width(branchColW).Inherit(branchStyle).Render(branchText)
+	}
+
+	statusCol := lipgloss.NewStyle().Width(statusColW).Render(renderStatus(wt.DirtyFiles, wt.Ahead, wt.Behind, wt.HasUpstream))
+	ageCol := lipgloss.NewStyle().Width(ageColW).Inherit(ageStyle).Render(FormatRelativeTime(wt.LastCommit.When, now))
+
+	var liveCol string
+	if state.Live != nil {
+		liveCol = liveStyle.Render("●") + " " + modelStyle.Render(state.Live.Model)
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, cursor, branchCol, "  ", statusCol, "  ", ageCol, "  ", liveCol)
+}
+
+func computeBranchColW(ordered []string, states map[string]aggregator.WorktreeState) int {
+	w := branchColMin
+	for _, path := range ordered {
+		state, ok := states[path]
+		if !ok {
+			continue
+		}
+		n := utf8.RuneCountInString(FormatBranch(state.Worktree.Branch, state.Worktree.Detached))
+		if n > w {
+			w = n
+		}
+	}
+	if w > branchColMax {
+		w = branchColMax
+	}
+	return w
 }
 
 // renderWorktreeList renders visible worktrees, filtered by case-insensitive
@@ -96,6 +157,7 @@ func renderWorktreeList(
 	filterStr string,
 	now time.Time,
 ) string {
+	branchColW := computeBranchColW(ordered, states)
 	lowerFilter := strings.ToLower(filterStr)
 	lines := make([]string, 0, len(ordered))
 	for rawIdx, path := range ordered {
@@ -107,10 +169,10 @@ func renderWorktreeList(
 		if lowerFilter != "" && !strings.Contains(strings.ToLower(branch), lowerFilter) {
 			continue
 		}
-		lines = append(lines, renderRow(state, branch, rawIdx == focusIndex, now))
+		lines = append(lines, renderRow(state, branch, rawIdx == focusIndex, now, branchColW))
 	}
 	if len(lines) == 0 {
-		return "(no worktrees)"
+		return dimStyle.Render("   (no worktrees)")
 	}
 	return strings.Join(lines, "\n")
 }

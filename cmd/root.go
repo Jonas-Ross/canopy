@@ -55,7 +55,7 @@ processes at once.`,
 		}
 
 		agg, err := aggregator.New(aggregator.Config{
-			Repos:        []aggregator.Repo{{Root: repoRoot}},
+			Repos:        []aggregator.Repo{{Root: repoRoot, Name: filepath.Base(repoRoot)}},
 			SessionStore: store,
 		})
 		if err != nil {
