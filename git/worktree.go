@@ -1,12 +1,6 @@
-// Package git enumerates and inspects git worktrees by shelling out to
-// the git binary. It is intentionally small: ListWorktrees reads the
-// porcelain output of `git worktree list`, and WorktreeStatus combines
-// `status --porcelain`, `rev-list --left-right --count`, and
-// `log -1 --format=...` to populate the per-worktree state surfaced by
-// Canopy's operational view.
-//
-// No third-party dependencies. Shell-out is the job here; tests stub the
-// runCmd package variable to inject fixture output without invoking git.
+// Package git enumerates and inspects git worktrees by shelling out
+// to the git binary. ListWorktrees is cheap (one invocation, identity
+// only); WorktreeStatus is heavier (four invocations, full state).
 package git
 
 import (
@@ -46,16 +40,10 @@ type Commit struct {
 	When    time.Time
 }
 
-// runCmd is the seam every git invocation in this package goes through.
-// Tests replace it to return fixture bytes without forking a process.
-// Production uses exec.CommandContext so callers can bound shellouts.
-//
-// The exec import is intentional and limited to this seam — this is the
-// git package; shelling out IS the job. Higher layers must not import
-// os/exec for git work.
+// runCmd is the seam every git invocation goes through. Tests replace
+// it to return fixture bytes.
 var runCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	return cmd.Output()
+	return exec.CommandContext(ctx, name, args...).Output()
 }
 
 // ListWorktrees enumerates all worktrees of the repo at repoRoot. It
@@ -107,28 +95,18 @@ func WorktreeStatus(ctx context.Context, path string) (Worktree, error) {
 	return wt, nil
 }
 
-// readHeadBranch resolves the current branch of the worktree. Returns
-// (branch, detached=false, nil) for an attached HEAD, ("", true, nil)
-// for a detached HEAD. Uses `git symbolic-ref --short HEAD`, which exits
-// non-zero when HEAD is detached; that case is recognized via the
-// trimmed stderr or via failure with no stdout and handled silently.
+// readHeadBranch returns the current branch, or "" with detached=true
+// when HEAD is detached. symbolic-ref exits non-zero on detach; that
+// is the normal state, not an error.
 func readHeadBranch(ctx context.Context, path string) (string, bool, error) {
 	out, err := runCmd(ctx, "git", "-C", path, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
-		// symbolic-ref returns a non-zero exit when HEAD is detached.
-		// That is a normal state, not an error condition.
 		if isDetachedHeadErr(err) {
 			return "", true, nil
 		}
 		return "", false, err
 	}
-	branch := strings.TrimSpace(string(out))
-	if branch == "" {
-		// Defensive: empty stdout with nil err shouldn't happen, but
-		// treat it as detached rather than surfacing as a bug.
-		return "", true, nil
-	}
-	return branch, false, nil
+	return strings.TrimSpace(string(out)), false, nil
 }
 
 // readDirtyCount runs `git status --porcelain=v1` and returns the count
@@ -139,14 +117,11 @@ func readDirtyCount(ctx context.Context, path string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	count := 0
-	for _, line := range bytes.Split(out, []byte("\n")) {
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
-		count++
+	out = bytes.TrimRight(out, "\r\n")
+	if len(out) == 0 {
+		return 0, nil
 	}
-	return count, nil
+	return bytes.Count(out, []byte("\n")) + 1, nil
 }
 
 // readAheadBehind runs `git rev-list --left-right --count @{u}...HEAD`.

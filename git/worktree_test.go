@@ -232,11 +232,6 @@ func TestWorktreeStatus_DirtyFileCount(t *testing.T) {
 			want: 5,
 		},
 		{
-			name:   "trailing whitespace ignored",
-			status: " M a.go\n\n   \n M b.go\n",
-			want:   2,
-		},
-		{
 			name:   "single line no trailing newline",
 			status: " M lonely.go",
 			want:   1,

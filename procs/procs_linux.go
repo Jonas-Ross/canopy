@@ -3,6 +3,7 @@
 package procs
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -11,9 +12,8 @@ import (
 	"strings"
 )
 
-// procFSRoot is the procfs mount point. Indirected through a package
-// variable so tests can point at a fake tree built under t.TempDir().
-// Production code never reassigns it.
+// procFSRoot is the procfs mount point. Tests point it at a fake tree
+// under t.TempDir().
 var procFSRoot = "/proc"
 
 // ListByCwdPrefix returns processes whose cwd has the given prefix.
@@ -78,24 +78,16 @@ func ListByCwdPrefix(ctx context.Context, prefix string) ([]Process, error) {
 	return out, nil
 }
 
-// parsePid returns the integer pid for a /proc subdirectory name, or
-// (0, false) if the name isn't all digits. /proc contains many
-// non-numeric entries (self, thread-self, meminfo, sys, …) and we want
-// to skip them cheaply without leaning on strconv error strings.
+// parsePid returns the pid for a /proc subdirectory name, or (0, false)
+// if the name isn't an unsigned integer. ParseUint rejects the signs
+// strconv.Atoi accepts, so non-digit and non-empty names like "self" or
+// "+1" are filtered out cleanly.
 func parsePid(name string) (int, bool) {
-	if name == "" {
-		return 0, false
-	}
-	for i := 0; i < len(name); i++ {
-		if name[i] < '0' || name[i] > '9' {
-			return 0, false
-		}
-	}
-	n, err := strconv.Atoi(name)
+	u, err := strconv.ParseUint(name, 10, 32)
 	if err != nil {
 		return 0, false
 	}
-	return n, true
+	return int(u), true
 }
 
 // readComm reads /proc/<pid>/comm. The kernel writes the executable
@@ -118,16 +110,14 @@ func readCmdline(path string) []string {
 	if err != nil {
 		return nil
 	}
+	b = bytes.TrimRight(b, "\x00")
 	if len(b) == 0 {
 		return nil
 	}
-	// Trim a single trailing NUL if present, then split. Leaving the
-	// trailing NUL in place would produce a spurious empty final
-	// element.
-	b = []byte(strings.TrimRight(string(b), "\x00"))
-	if len(b) == 0 {
-		return nil
+	parts := bytes.Split(b, []byte{0})
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = string(p)
 	}
-	parts := strings.Split(string(b), "\x00")
-	return parts
+	return out
 }

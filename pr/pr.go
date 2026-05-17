@@ -1,21 +1,10 @@
-// Package pr is a thin wrapper over the `gh` CLI that surfaces just
-// enough pull-request state to drive Canopy's operational view —
-// number, title, state, draft flag, CI rollup, review decision, and
-// merge timestamps. One `gh pr list` call per repo yields the state
-// for every branch; the aggregator does the per-worktree lookup by
-// HeadBranch.
+// Package pr is a thin wrapper over the `gh` CLI that surfaces
+// pull-request state to drive Canopy's operational view. One
+// `gh pr list` call per repo yields the state for every branch; the
+// aggregator looks up by HeadBranch.
 //
-// The package has no third-party dependencies. The single shell-out
-// surface is the runCmd package variable; tests replace it to inject
-// fixture stdout without forking a process. Failure modes (no gh
-// binary, not authenticated, exec failure) are mapped to sentinel
-// errors so callers can degrade gracefully — the handoff design calls
-// for silent degradation when PR state is unavailable.
-//
-// Cache (see cache.go) is layered on top with a 30s TTL plus
-// stale-on-error semantics: a failed refresh after a previously
-// successful one returns the cached payload with a stale=true marker
-// rather than an error.
+// Failure modes (no gh binary, not authenticated, exec failure) map
+// to sentinel errors so callers can degrade silently.
 package pr
 
 import (
@@ -28,26 +17,17 @@ import (
 	"time"
 )
 
-// ErrNoGH is returned when the gh binary is not installed. Callers
-// should treat this as "PR info unavailable, degrade silently."
-var ErrNoGH = errors.New("pr: gh CLI not installed")
+const ghPRListLimit = "100"
 
-// ErrNotAuthed is returned when gh is installed but the user isn't
-// authenticated. Callers should surface a one-time warning, then
-// treat as no PR info.
+var ErrNoGH = errors.New("pr: gh CLI not installed")
 var ErrNotAuthed = errors.New("pr: gh not authenticated")
 
 // PR is the per-pull-request state surfaced by this package.
 //
-// State and IsDraft are intentionally kept separate: a draft PR is
-// still OPEN, and the visual treatment for draft-vs-ready is
-// orthogonal to the cleanup signal carried by State.
-//
-// CIRollup is a coarse summary derived from gh's statusCheckRollup
-// array; see rollupCI for the precedence rules. ReviewState mirrors
-// gh's reviewDecision verbatim. Empty strings on either field mean
-// "no signal" (no checks attached, no review yet) and should not be
-// rendered as a failure.
+// State and IsDraft are kept separate: a draft PR is still OPEN, and
+// draft-vs-ready treatment is orthogonal to the cleanup signal
+// carried by State. CIRollup and ReviewState use the empty string for
+// "no signal" — render as neutral, not as a failure.
 type PR struct {
 	Number      int
 	Title       string
@@ -61,27 +41,15 @@ type PR struct {
 	URL         string
 }
 
-// lookPath resolves a binary on PATH. Package-level so tests can stub
-// it without invoking exec.LookPath on the host (which would resolve
-// to the real gh and skew the "not installed" case).
 var lookPath = exec.LookPath
 
 // runCmd is the seam every external invocation in this package goes
-// through. Tests replace it to return fixture bytes (or fixture
-// errors) without forking a process. Production uses
-// exec.CommandContext with Dir=workingDir so the gh invocation runs
-// against the right repo. Stderr is captured via CombinedOutput so
-// the auth-failure detection (matches on stderr text) keeps working
-// when the real gh runs.
+// through. cmd.Output() leaves stderr on *exec.ExitError.Stderr when
+// cmd.Stderr is nil, which isAuthErr relies on.
 var runCmd = func(ctx context.Context, workingDir, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = workingDir
-	// gh writes auth errors to stderr; CombinedOutput keeps them in
-	// the byte slice that surfaces via *exec.ExitError.Stderr, and
-	// the *exec.ExitError returned from Run still carries Stderr for
-	// the typed branch in classifyGHErr.
-	out, err := cmd.Output()
-	return out, err
+	return cmd.Output()
 }
 
 // ghPR is the on-the-wire shape of one entry returned by
@@ -125,7 +93,7 @@ func List(ctx context.Context, repoRoot string) ([]PR, error) {
 		"pr", "list",
 		"--json", "number,title,state,isDraft,headRefName,statusCheckRollup,reviewDecision,mergedAt,updatedAt,url",
 		"--state", "all",
-		"--limit", "100",
+		"--limit", ghPRListLimit,
 	}
 	out, err := runCmd(ctx, repoRoot, "gh", args...)
 	if err != nil {
