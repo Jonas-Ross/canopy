@@ -15,26 +15,22 @@ import (
 )
 
 // Worktree is the per-worktree state surfaced by this package.
-//
-// ListWorktrees populates the cheap-to-read identification fields
-// (Path, Branch, Bare, Detached). The status fields (DirtyFiles, Ahead,
-// Behind, HasUpstream, LastCommit) are populated only by WorktreeStatus,
-// which runs the heavier per-worktree git invocations.
+// ListWorktrees populates the identity fields only (Path, Branch, Bare,
+// Detached). The status fields are filled in by WorktreeStatus.
 type Worktree struct {
-	Path        string // absolute path
-	Branch      string // current branch, empty if detached
+	Path        string
+	Branch      string // empty when Detached
 	Bare        bool
 	Detached    bool
-	DirtyFiles  int    // 0 = clean
-	Ahead       int    // commits ahead of upstream
-	Behind      int    // commits behind upstream
-	HasUpstream bool   // false if no @{u}; in that case Ahead/Behind are 0 and meaningless
+	DirtyFiles  int
+	Ahead       int
+	Behind      int
+	HasUpstream bool // false if no @{u} — Ahead and Behind are then meaningless
 	LastCommit  Commit
 }
 
-// Commit is the minimal commit metadata used in worktree summaries.
 type Commit struct {
-	Hash    string    // short sha
+	Hash    string // short sha
 	Subject string
 	Author  string
 	When    time.Time
@@ -59,9 +55,8 @@ func ListWorktrees(ctx context.Context, repoRoot string) ([]Worktree, error) {
 }
 
 // WorktreeStatus returns the fully populated state of the worktree at
-// path. Three git invocations: status, rev-list, log. A missing upstream
-// on rev-list is not an error — HasUpstream is set to false and Ahead /
-// Behind are left at zero.
+// path. A missing upstream on rev-list is not an error — HasUpstream is
+// set to false and Ahead/Behind are left at zero.
 func WorktreeStatus(ctx context.Context, path string) (Worktree, error) {
 	wt := Worktree{Path: path}
 
@@ -161,11 +156,9 @@ func readLastCommit(ctx context.Context, path string) (Commit, error) {
 	if err != nil {
 		return Commit{}, err
 	}
-	// `git log` terminates the record with a trailing newline.
 	trimmed := bytes.TrimRight(out, "\n")
 	if len(trimmed) == 0 {
-		// No commits in the repo yet. Treat as empty Commit, no error;
-		// the worktree exists but has nothing to summarize.
+		// Empty repo (no commits). Return zero Commit, not an error.
 		return Commit{}, nil
 	}
 	parts := bytes.Split(trimmed, []byte{0})

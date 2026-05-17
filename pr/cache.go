@@ -97,7 +97,6 @@ func (c *Cache) getOrCreate(repoRoot string) *cacheEntry {
 func (c *Cache) Get(ctx context.Context, repoRoot string) ([]PR, bool, error) {
 	e := c.getOrCreate(repoRoot)
 
-	// Fast path: cell is fresh and we have a result.
 	e.mu.Lock()
 	if e.ok && c.ttl > 0 && now().Sub(e.fetchedAt) < c.ttl {
 		out := e.prs
@@ -106,14 +105,12 @@ func (c *Cache) Get(ctx context.Context, repoRoot string) ([]PR, bool, error) {
 	}
 	e.mu.Unlock()
 
-	// Slow path: serialize refreshes for this key. Whichever
-	// goroutine wins runs the List; the rest wait, then re-check.
+	// Coalesce concurrent refreshes for this key: serialize on
+	// fetchMu, then re-check freshness so a peer's just-completed
+	// refresh isn't redone.
 	e.fetchMu.Lock()
 	defer e.fetchMu.Unlock()
 
-	// Re-check under the cell mutex now that we hold fetchMu. If a
-	// peer refreshed while we were waiting, we should reuse its
-	// result instead of running List again.
 	e.mu.Lock()
 	if e.ok && c.ttl > 0 && now().Sub(e.fetchedAt) < c.ttl {
 		out := e.prs

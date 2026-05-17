@@ -150,12 +150,9 @@ func rollupCI(checks []ghCheckRoll) string {
 		}
 		switch c.Conclusion {
 		case "SUCCESS", "SKIPPED", "NEUTRAL":
-			// non-failure
 		case "":
-			// Empty conclusion on a non-terminal check is fine; it
-			// will be covered by the pending branch. Empty on a
-			// terminal check is unexpected but conservatively treated
-			// as non-success.
+			// Empty conclusion on a non-pending check is unexpected;
+			// treat as non-success conservatively.
 			if !pending {
 				allOK = false
 			}
@@ -186,15 +183,8 @@ func parseGHTime(s string) time.Time {
 }
 
 // classifyGHErr maps a raw exec error from `gh` to a sentinel where
-// possible. The auth-failure check uses a broad lowercase substring
-// match against both err.Error() and any captured stderr — gh's
-// wording has shifted across versions ("not logged into",
-// "authentication required", "you are not logged in") and we don't
-// want to chase the exact phrasing.
+// possible. Only called when err is non-nil.
 func classifyGHErr(err error) error {
-	if err == nil {
-		return nil
-	}
 	if isAuthErr(err) {
 		return ErrNotAuthed
 	}
