@@ -27,7 +27,7 @@ CI: `.github/workflows/ci.yml` runs `go vet`, `go build`, and `go test -race -co
 - Branch names: `feat/<slug>`, `fix/<slug>`, `docs/<slug>`, `refactor/<slug>`, `chore/<slug>`. Lowercase, hyphenated.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <subject>`. Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, `build`, `ci`. Scope is the package or area (`sessions`, `cmd`, `docs`, etc.). Subject in imperative mood, lowercase, no trailing period.
 - Keep commits as logical chunks — one concern per commit. Each commit should leave the build green where reasonable; bisectability is preferred but not strict.
-- Do not push or open PRs without explicit ask.
+- Pushing feature branches and opening PRs is part of the normal flow — no per-action confirmation needed. Never push directly to `main`, never force-push, never merge without explicit ask.
 - Do not amend committed work; create a new commit.
 
 ## Architecture
