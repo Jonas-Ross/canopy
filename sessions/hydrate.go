@@ -1,0 +1,220 @@
+package sessions
+
+import (
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
+)
+
+// inflightHydrate tracks a Hydrate call currently in progress for a
+// session ID. Concurrent callers find the same value via the
+// per-Store sync.Map and block on done; only the first caller runs
+// the underlying file scan. When the scan finishes the value is
+// removed from the map, so the next sequential call performs a fresh
+// scan (preserving the documented idempotence-via-re-scan contract).
+type inflightHydrate struct {
+	done   chan struct{}   // closed when the scan completes
+	result hydrateResult   // valid iff err == nil
+	err    error           // non-nil → scan failed
+}
+
+// storeGates holds the per-Store in-flight tables. Keyed by *Store;
+// value is a *sync.Map keyed by session ID → *inflightHydrate. Kept
+// in a package-level sync.Map so this file owns it entirely (the
+// brief restricts edits to store.go).
+var storeGates sync.Map // map[*Store]*sync.Map
+
+// Hydrate fills the lazy fields on Session: EventCount, Tokens, Tools,
+// and the full Cwds set. Idempotent: each call re-scans the JSONL and
+// overwrites — repeated calls converge on the same final state. The
+// per-session single-flight ensures concurrent callers share one scan
+// rather than racing on the file.
+//
+// Behavior:
+//   - sess == nil or sess.ID == "" returns an error.
+//   - A session ID not present in the index returns a wrapped
+//     ErrNotFound.
+//   - The session's JSONL file is iterated via Events(sess.ID).
+//     Malformed lines fail Hydrate fast (Hydrate is about accurate
+//     aggregation, not best-effort rendering).
+//   - EventCount counts every event surfaced by Events (post-meta /
+//     side-band filtering).
+//   - Tokens are summed across assistant lines deduped by message.id:
+//     the CLI splits one logical assistant response across multiple
+//     JSONL lines that all carry the same message.id and the same
+//     usage object. Counting each line would double- or triple-count.
+//   - Tools[name] counts EventToolUse events. Tool results are not
+//     calls and are not counted. After Hydrate, Tools is always
+//     non-nil (possibly empty).
+//   - Cwds is replaced with the full ordered distinct-cwd set
+//     observed across user lines. Observation order is preserved; no
+//     sorting.
+//   - CompactBoundary events contribute to EventCount only; their
+//     PreCompactTokens / PostCompactTokens are scratch reference
+//     (real per-message accounting lives on assistant lines).
+//
+// Concurrency contract:
+//   - Concurrent Hydrate calls for the same session collapse into one
+//     file scan: the first caller runs the scan, later concurrent
+//     callers block on the same in-flight record and reuse its
+//     result. Sequential calls each re-scan.
+//   - The final state is installed onto the indexed Session under a
+//     short write lock; concurrent readers of *sess see either the
+//     pre-hydrate or post-hydrate snapshot, never a partial mix.
+//     EventCount / Tokens / Tools / Cwds are committed together.
+//   - Distinct sessions hydrate in parallel.
+func (s *Store) Hydrate(sess *Session) error {
+	if sess == nil {
+		return errors.New("sessions: Hydrate: nil session")
+	}
+	if sess.ID == "" {
+		return errors.New("sessions: Hydrate: empty session ID")
+	}
+
+	// Confirm the session is in the index. Hydrate writes through to
+	// the index entry; an unindexed *Session is a caller bug.
+	indexed, err := s.Session(sess.ID)
+	if err != nil {
+		return fmt.Errorf("sessions: Hydrate %s: %w", sess.ID, err)
+	}
+
+	// Single-flight: either start a new in-flight or attach to an
+	// existing one. The starter is the goroutine whose LoadOrStore
+	// inserted the fresh record; only it runs the scan.
+	gatesAny, _ := storeGates.LoadOrStore(s, &sync.Map{})
+	gates := gatesAny.(*sync.Map)
+
+	mine := &inflightHydrate{done: make(chan struct{})}
+	got, loaded := gates.LoadOrStore(sess.ID, mine)
+	flight := got.(*inflightHydrate)
+
+	if loaded {
+		// Someone else is scanning; wait for them and reuse.
+		<-flight.done
+		if flight.err != nil {
+			return flight.err
+		}
+		commitHydrate(s, indexed, sess, flight.result)
+		return nil
+	}
+
+	// We are the scanner. Always remove the in-flight record and
+	// close done so blocked waiters unblock exactly once.
+	defer func() {
+		gates.Delete(sess.ID)
+		close(flight.done)
+	}()
+
+	if hook := hydrateScanHook.Load(); hook != nil {
+		(*hook)(sess.ID)
+	}
+
+	result, err := computeHydrate(s, sess.ID)
+	if err != nil {
+		flight.err = err
+		return err
+	}
+	flight.result = result
+
+	commitHydrate(s, indexed, sess, result)
+	return nil
+}
+
+// commitHydrate installs result onto both the indexed Session
+// (canonical, stable pointer) and the caller's *sess (which may be
+// distinct on test paths). The Store's RWMutex serialises this with
+// other readers / writers so observers never see a partial mix.
+func commitHydrate(s *Store, indexed, sess *Session, result hydrateResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	indexed.EventCount = result.eventCount
+	indexed.Tokens = result.tokens
+	indexed.Tools = result.tools
+	indexed.Cwds = result.cwds
+
+	if sess != indexed {
+		sess.EventCount = result.eventCount
+		sess.Tokens = result.tokens
+		sess.Tools = result.tools
+		sess.Cwds = result.cwds
+	}
+}
+
+// hydrateScanHook is a test-only seam invoked at the start of every
+// underlying file scan (exactly once per single-flight). Tests
+// override it via atomic.Pointer to assert single-flight behaviour
+// without re-scanning. Production callers never set it; nil load is
+// the no-op fast path.
+var hydrateScanHook atomic.Pointer[func(sessionID string)]
+
+// hydrateResult is the intermediate value computed during a scan
+// before it is committed onto the indexed Session.
+type hydrateResult struct {
+	eventCount int
+	tokens     TokenStats
+	tools      map[string]int
+	cwds       []string
+}
+
+// computeHydrate iterates the session's events once and returns the
+// aggregated fields. It does not mutate any *Session; the caller
+// commits the result under the per-session gate.
+func computeHydrate(s *Store, sessionID string) (hydrateResult, error) {
+	res := hydrateResult{
+		tools: make(map[string]int),
+	}
+	seenMessageIDs := make(map[string]struct{})
+	seenCwds := make(map[string]struct{})
+
+	for ev, err := range s.Events(sessionID) {
+		if err != nil {
+			return hydrateResult{}, fmt.Errorf("sessions: hydrate %s: %w", sessionID, err)
+		}
+		res.eventCount++
+
+		switch ev.Kind {
+		case EventAssistant:
+			if ev.Assistant == nil {
+				continue
+			}
+			if id := ev.Assistant.MessageID; id != "" {
+				if _, dup := seenMessageIDs[id]; dup {
+					continue
+				}
+				seenMessageIDs[id] = struct{}{}
+			}
+			// Assistant lines without a MessageID are treated as
+			// their own bucket (one-shot accounting); we cannot
+			// dedupe what the CLI did not key. In practice this is
+			// vanishingly rare on real data.
+			res.tokens.Input += ev.Assistant.Tokens.Input
+			res.tokens.Output += ev.Assistant.Tokens.Output
+			res.tokens.CacheRead += ev.Assistant.Tokens.CacheRead
+			res.tokens.CacheCreation += ev.Assistant.Tokens.CacheCreation
+
+		case EventToolUse:
+			if ev.ToolUse == nil {
+				continue
+			}
+			res.tools[ev.ToolUse.Name]++
+
+		case EventUser:
+			if ev.User != nil {
+				cwd := ev.User.Cwd
+				if cwd != "" {
+					if _, dup := seenCwds[cwd]; !dup {
+						seenCwds[cwd] = struct{}{}
+						res.cwds = append(res.cwds, cwd)
+					}
+				}
+			}
+
+		case EventToolResult, EventCompactBoundary:
+			// Counted in EventCount above; nothing else to aggregate.
+		}
+	}
+
+	return res, nil
+}
