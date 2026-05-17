@@ -26,14 +26,13 @@ processes at once.`,
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 
-		// Locate the Claude Code projects root.
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return fmt.Errorf("canopy: resolve home dir: %w", err)
 		}
 		projectsRoot := filepath.Join(home, ".claude", "projects")
 
-		// Opening the session store takes ~467ms on large histories.
+		// sessions.Open scans ~/.claude/projects — ~467ms on large histories.
 		fmt.Fprintln(cmd.ErrOrStderr(), "Loading sessions…")
 		store, err := sessions.Open(projectsRoot)
 		if err != nil {
@@ -41,7 +40,6 @@ processes at once.`,
 		}
 		defer store.Close()
 
-		// Discover the repo root for the current working directory.
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("canopy: get cwd: %w", err)
@@ -50,8 +48,7 @@ processes at once.`,
 		if err != nil {
 			return fmt.Errorf("canopy: list worktrees: %w", err)
 		}
-		// The main worktree path is the repo root — use the first worktree's
-		// path resolved to its top-level (git worktree list returns absolute paths).
+		// `git worktree list --porcelain` returns the main worktree first.
 		repoRoot := cwd
 		if len(wts) > 0 {
 			repoRoot = wts[0].Path

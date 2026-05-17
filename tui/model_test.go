@@ -478,10 +478,10 @@ func TestModelView_NoDirtyCountWhenZero(t *testing.T) {
 // Acceptance criterion: "ahead/behind only when Worktree.HasUpstream"
 func TestModelView_AheadBehind(t *testing.T) {
 	tests := []struct {
-		name        string
-		wt          git.Worktree
-		wantAhead   bool
-		wantBehind  bool
+		name       string
+		wt         git.Worktree
+		wantAhead  bool
+		wantBehind bool
 	}{
 		{
 			name: "has upstream with ahead and behind",

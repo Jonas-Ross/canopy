@@ -8,9 +8,7 @@ import (
 	"github.com/jonasross/canopy/aggregator"
 )
 
-// FormatRelativeTime returns a short human-readable duration for when,
-// relative to now. Returns "now" for times within the last minute, then
-// "Xm", "Xh", "Xd". A zero when returns "-".
+// FormatRelativeTime returns "now" / "Xm" / "Xh" / "Xd"; zero when returns "-".
 func FormatRelativeTime(when, now time.Time) string {
 	if when.IsZero() {
 		return "-"
@@ -31,8 +29,7 @@ func FormatRelativeTime(when, now time.Time) string {
 	}
 }
 
-// FormatAheadBehind returns the ahead/behind indicator string.
-// Returns "" when hasUpstream is false.
+// FormatAheadBehind returns "↑N ↓M" / "=" / "" depending on upstream state.
 func FormatAheadBehind(ahead, behind int, hasUpstream bool) string {
 	if !hasUpstream {
 		return ""
@@ -50,8 +47,7 @@ func FormatAheadBehind(ahead, behind int, hasUpstream bool) string {
 	return strings.Join(parts, " ")
 }
 
-// FormatBranch returns the display string for a branch: the branch name,
-// or "(detached)" when detached is true.
+// FormatBranch returns the branch name, or "(detached)" when detached.
 func FormatBranch(branch string, detached bool) string {
 	if detached {
 		return "(detached)"
@@ -59,33 +55,24 @@ func FormatBranch(branch string, detached bool) string {
 	return branch
 }
 
-// renderRow renders one worktree row as a plain string. The focused flag
-// applies the reverse-video style. now is injected so pure tests can fix
-// the clock.
-func renderRow(state aggregator.WorktreeState, focused bool, now time.Time) string {
+func renderRow(state aggregator.WorktreeState, branch string, focused bool, now time.Time) string {
 	wt := state.Worktree
 	var sb strings.Builder
 
-	// Branch / detached.
-	branch := FormatBranch(wt.Branch, wt.Detached)
 	sb.WriteString(branch)
 
-	// Dirty count.
 	if wt.DirtyFiles > 0 {
 		sb.WriteString(fmt.Sprintf("  ~%d", wt.DirtyFiles))
 	}
 
-	// Ahead/behind.
 	if ab := FormatAheadBehind(wt.Ahead, wt.Behind, wt.HasUpstream); ab != "" {
 		sb.WriteString("  ")
 		sb.WriteString(ab)
 	}
 
-	// Last-commit age.
 	sb.WriteString("  ")
 	sb.WriteString(FormatRelativeTime(wt.LastCommit.When, now))
 
-	// Live indicator.
 	if state.Live != nil {
 		sb.WriteString("  ")
 		sb.WriteString(liveStyle.Render("●"))
@@ -100,9 +87,8 @@ func renderRow(state aggregator.WorktreeState, focused bool, now time.Time) stri
 	return row
 }
 
-// renderWorktreeList renders all visible worktrees to a multi-line string.
-// It filters by filterStr (case-insensitive branch-name substring) when non-empty.
-// focusIndex is the index within the *unfiltered* ordered list.
+// renderWorktreeList renders visible worktrees, filtered by case-insensitive
+// branch substring. focusIndex indexes the unfiltered ordered list.
 func renderWorktreeList(
 	ordered []string,
 	states map[string]aggregator.WorktreeState,
@@ -110,23 +96,21 @@ func renderWorktreeList(
 	filterStr string,
 	now time.Time,
 ) string {
-	var lines []string
+	lowerFilter := strings.ToLower(filterStr)
+	lines := make([]string, 0, len(ordered))
 	for rawIdx, path := range ordered {
 		state, ok := states[path]
 		if !ok {
 			continue
 		}
-		wt := state.Worktree
-		branch := FormatBranch(wt.Branch, wt.Detached)
-		if filterStr != "" && !strings.Contains(strings.ToLower(branch), strings.ToLower(filterStr)) {
+		branch := FormatBranch(state.Worktree.Branch, state.Worktree.Detached)
+		if lowerFilter != "" && !strings.Contains(strings.ToLower(branch), lowerFilter) {
 			continue
 		}
-		focused := rawIdx == focusIndex
-		lines = append(lines, renderRow(state, focused, now))
+		lines = append(lines, renderRow(state, branch, rawIdx == focusIndex, now))
 	}
 	if len(lines) == 0 {
 		return "(no worktrees)"
 	}
 	return strings.Join(lines, "\n")
 }
-
