@@ -33,3 +33,4 @@ go.work.sum
 *.swp
 *.swo
 .worktrees/
+.claude/issue-runs/
