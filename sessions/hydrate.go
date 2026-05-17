@@ -89,6 +89,10 @@ func (s *Store) Hydrate(sess *Session) error {
 	got, loaded := gates.LoadOrStore(sess.ID, mine)
 	flight := got.(*inflightHydrate)
 
+	if hook := hydrateGateHook.Load(); hook != nil {
+		(*hook)(sess.ID, loaded)
+	}
+
 	if loaded {
 		// Someone else is scanning; wait for them and reuse.
 		<-flight.done
@@ -148,6 +152,14 @@ func commitHydrate(s *Store, indexed, sess *Session, result hydrateResult) {
 // without re-scanning. Production callers never set it; nil load is
 // the no-op fast path.
 var hydrateScanHook atomic.Pointer[func(sessionID string)]
+
+// hydrateGateHook is a test-only seam invoked once per Hydrate call,
+// right after LoadOrStore decides whether the caller is the scanner
+// (loaded=false) or a follower (loaded=true). Tests use it to
+// synchronise on "all N goroutines have entered the gate" before
+// releasing the scanner, eliminating timing races in single-flight
+// assertions.
+var hydrateGateHook atomic.Pointer[func(sessionID string, follower bool)]
 
 // hydrateResult is the intermediate value computed during a scan
 // before it is committed onto the indexed Session.

@@ -294,27 +294,44 @@ func TestHydrate_ConcurrentSameSession_SingleFlight(t *testing.T) {
 		t.Fatalf("Session: %v", err)
 	}
 
-	// Instrument the underlying scan via the hydrateScanHook seam.
-	// Capture (count, slow-start-signal) so we can hold the first
-	// scanner long enough for the other goroutines to attach to the
-	// in-flight record.
+	// Hold the scanner inside the gate until all N goroutines have
+	// attached via LoadOrStore. The gate hook fires once per Hydrate
+	// call right after attachment; counting those is the only
+	// deterministic way to know the gate is fully populated.
+	//
+	// Both hooks filter by sess.ID: the package-level hook pointers
+	// are global, so parallel tests calling Hydrate on other sessions
+	// would otherwise increment our counter and release the scanner
+	// before our followers have arrived.
+	const N = 10
 	var scans atomic.Int32
-	start := make(chan struct{})
+	var gateArrivals atomic.Int32
+	allAttached := make(chan struct{})
 	release := make(chan struct{})
-	var startOnce sync.Once
-	prev := hydrateScanHook.Load()
-	hook := func(string) {
-		if scans.Add(1) == 1 {
-			startOnce.Do(func() { close(start) })
-			<-release
+
+	prevGate := hydrateGateHook.Load()
+	gateHook := func(id string, _ bool) {
+		if id != sess.ID {
+			return
+		}
+		if gateArrivals.Add(1) == N {
+			close(allAttached)
 		}
 	}
-	hydrateScanHook.Store(&hook)
-	// Clear the hook before any cleanup-time release so other parallel
-	// tests cannot invoke a stale closure.
-	t.Cleanup(func() { hydrateScanHook.Store(prev) })
+	hydrateGateHook.Store(&gateHook)
+	t.Cleanup(func() { hydrateGateHook.Store(prevGate) })
 
-	const N = 10
+	prevScan := hydrateScanHook.Load()
+	scanHook := func(id string) {
+		if id != sess.ID {
+			return
+		}
+		scans.Add(1)
+		<-release
+	}
+	hydrateScanHook.Store(&scanHook)
+	t.Cleanup(func() { hydrateScanHook.Store(prevScan) })
+
 	var wg sync.WaitGroup
 	errs := make(chan error, N)
 	for i := 0; i < N; i++ {
@@ -325,18 +342,7 @@ func TestHydrate_ConcurrentSameSession_SingleFlight(t *testing.T) {
 		}()
 	}
 
-	// Wait for the first scanner to enter, give the rest time to
-	// attach to the in-flight record, then release.
-	<-start
-	// Spin until the others have had a chance to enqueue. We can't
-	// observe the inflight map directly here, so loop until either
-	// goroutines have settled (no progress) or a budget elapses.
-	// In practice they enter LoadOrStore in microseconds.
-	for i := 0; i < 1000; i++ {
-		if scans.Load() >= 1 {
-			break
-		}
-	}
+	<-allAttached
 	close(release)
 
 	wg.Wait()
