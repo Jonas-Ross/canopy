@@ -298,6 +298,11 @@ func TestHydrate_ConcurrentSameSession_SingleFlight(t *testing.T) {
 	// attached via LoadOrStore. The gate hook fires once per Hydrate
 	// call right after attachment; counting those is the only
 	// deterministic way to know the gate is fully populated.
+	//
+	// Both hooks filter by sess.ID: the package-level hook pointers
+	// are global, so parallel tests calling Hydrate on other sessions
+	// would otherwise increment our counter and release the scanner
+	// before our followers have arrived.
 	const N = 10
 	var scans atomic.Int32
 	var gateArrivals atomic.Int32
@@ -305,7 +310,10 @@ func TestHydrate_ConcurrentSameSession_SingleFlight(t *testing.T) {
 	release := make(chan struct{})
 
 	prevGate := hydrateGateHook.Load()
-	gateHook := func(string, bool) {
+	gateHook := func(id string, _ bool) {
+		if id != sess.ID {
+			return
+		}
 		if gateArrivals.Add(1) == N {
 			close(allAttached)
 		}
@@ -314,7 +322,10 @@ func TestHydrate_ConcurrentSameSession_SingleFlight(t *testing.T) {
 	t.Cleanup(func() { hydrateGateHook.Store(prevGate) })
 
 	prevScan := hydrateScanHook.Load()
-	scanHook := func(string) {
+	scanHook := func(id string) {
+		if id != sess.ID {
+			return
+		}
 		scans.Add(1)
 		<-release
 	}
