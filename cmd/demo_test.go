@@ -3,10 +3,11 @@ package cmd
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jonasross/canopy/internal/demo"
 )
 
 // TestDemoScript_OpenPRWithPR exercises the demo subcommand end-to-end:
@@ -17,7 +18,7 @@ import (
 // the "opening" notice in the captured frame catches that class of wiring
 // bug for cmd/demo.go independently of cmd/root.go.
 func TestDemoScript_OpenPRWithPR(t *testing.T) {
-	requireGit(t)
+	demo.RequireGit(t)
 
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "open_pr.txt")
@@ -47,9 +48,3 @@ func TestDemoScript_OpenPRWithPR(t *testing.T) {
 	}
 }
 
-func requireGit(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH; skipping demo integration test")
-	}
-}

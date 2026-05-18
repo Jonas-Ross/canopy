@@ -11,7 +11,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
+
+	"github.com/jonasross/canopy/tui"
 )
 
 const fixturePrefix = "canopy-demo-"
@@ -75,12 +78,24 @@ func (f *Fixture) PRFixtureBytes() ([]byte, error) {
 }
 
 // WorktreePath returns the absolute filesystem path of a fixture worktree.
+// Defers to tui.WorktreePath so the fixture stays in lockstep with where
+// the real `n` (new worktree) flow places branches.
 func (f *Fixture) WorktreePath(branch string) string {
 	if branch == BranchMain {
 		return f.RepoRoot
 	}
-	return filepath.Join(f.RepoRoot, ".worktrees", strings.ReplaceAll(branch, "/", "+"))
+	return tui.WorktreePath(f.RepoRoot, branch)
 }
+
+// RequireGit skips t when git is not on PATH. Exported so other packages
+// can gate fixture-using tests on the same precondition.
+func RequireGit(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH; skipping fixture-backed test")
+	}
+}
+
 
 func mkRoot(parent string) (string, error) {
 	var dir string

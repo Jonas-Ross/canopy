@@ -106,8 +106,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pulseExpiredMsg:
-		// Just re-render; View() reads m.pulseUntil against now and stops
-		// rendering the pulse style once it has passed.
 		return m, nil
 
 	case prOpenedMsg:
@@ -258,56 +256,52 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m Model) updateConfirmPrune(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// confirmKey routes a y/Y/n/N/Esc keypress in a confirm-modal mode. When the
+// user presses yes, onYes is invoked with the focused state and produces the
+// resulting (Model, Cmd). Other keys cancel back to modeNormal or no-op.
+func (m Model) confirmKey(msg tea.KeyMsg, onYes func(Model, aggregator.WorktreeState) (Model, tea.Cmd)) (Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc {
 		m.mode = modeNormal
 		return m, nil
 	}
-	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
-		r := msg.Runes[0]
-		if r == 'y' || r == 'Y' {
-			state, ok := m.focusedState()
-			m.mode = modeNormal
-			if !ok {
-				return m, nil
-			}
-			m.notice = noticeStyle.Render("pruning " + FormatBranch(state.Worktree.Branch, state.Worktree.Detached) + "…")
-			return m, removeWorktreeCmd(state.Worktree.Path)
-		}
-		if r == 'n' || r == 'N' {
-			m.mode = modeNormal
+	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
+		return m, nil
+	}
+	switch msg.Runes[0] {
+	case 'y', 'Y':
+		state, ok := m.focusedState()
+		m.mode = modeNormal
+		if !ok {
 			return m, nil
 		}
+		return onYes(m, state)
+	case 'n', 'N':
+		m.mode = modeNormal
 	}
 	return m, nil
 }
 
+func (m Model) updateConfirmPrune(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	next, cmd := m.confirmKey(msg, func(m Model, state aggregator.WorktreeState) (Model, tea.Cmd) {
+		m.notice = noticeStyle.Render("pruning " + FormatBranch(state.Worktree.Branch, state.Worktree.Detached) + "…")
+		return m, removeWorktreeCmd(state.Worktree.Path)
+	})
+	return next, cmd
+}
+
 func (m Model) updateConfirmKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.Type == tea.KeyEsc {
-		m.mode = modeNormal
-		return m, nil
-	}
-	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
-		r := msg.Runes[0]
-		if r == 'y' || r == 'Y' {
-			state, ok := m.focusedState()
-			m.mode = modeNormal
-			if !ok || len(state.Procs) == 0 {
-				return m, nil
-			}
-			pids := make([]int, 0, len(state.Procs))
-			for _, p := range state.Procs {
-				pids = append(pids, p.Pid)
-			}
-			m.notice = noticeStyle.Render(fmt.Sprintf("sending SIGTERM to %d procs…", len(pids)))
-			return m, killProcsCmd(pids)
-		}
-		if r == 'n' || r == 'N' {
-			m.mode = modeNormal
+	next, cmd := m.confirmKey(msg, func(m Model, state aggregator.WorktreeState) (Model, tea.Cmd) {
+		if len(state.Procs) == 0 {
 			return m, nil
 		}
-	}
-	return m, nil
+		pids := make([]int, 0, len(state.Procs))
+		for _, p := range state.Procs {
+			pids = append(pids, p.Pid)
+		}
+		m.notice = noticeStyle.Render(fmt.Sprintf("sending SIGTERM to %d procs…", len(pids)))
+		return m, killProcsCmd(pids)
+	})
+	return next, cmd
 }
 
 func (m Model) moveFocus(delta int) Model {

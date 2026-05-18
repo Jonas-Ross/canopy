@@ -2,8 +2,7 @@ package demo_test
 
 import (
 	"context"
-	"os/exec"
-	"path/filepath"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ import (
 )
 
 func TestBuild_CreatesValidSandbox(t *testing.T) {
-	requireGit(t)
+	demo.RequireGit(t)
 
 	f, err := demo.Build("")
 	if err != nil {
@@ -26,8 +25,8 @@ func TestBuild_CreatesValidSandbox(t *testing.T) {
 	// Each named worktree directory exists.
 	for _, branch := range []string{demo.BranchAuth, demo.BranchDashboard, demo.BranchLogin, demo.BranchDeps} {
 		p := f.WorktreePath(branch)
-		if !pathExists(t, p) {
-			t.Errorf("worktree path missing: %s", p)
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("worktree path missing: %s (%v)", p, err)
 		}
 	}
 
@@ -64,7 +63,7 @@ func TestBuild_CreatesValidSandbox(t *testing.T) {
 }
 
 func TestBuild_AggregatorSnapshotShowsExpectedState(t *testing.T) {
-	requireGit(t)
+	demo.RequireGit(t)
 
 	f, err := demo.Build("")
 	if err != nil {
@@ -155,29 +154,10 @@ func TestBuild_AggregatorSnapshotShowsExpectedState(t *testing.T) {
 	}
 }
 
-func pathExists(t *testing.T, p string) bool {
-	t.Helper()
-	_, err := filepath.Abs(p)
-	if err != nil {
-		t.Fatalf("filepath.Abs: %v", err)
-	}
-	if _, err := exec.Command("test", "-e", p).Output(); err != nil {
-		return false
-	}
-	return true
-}
-
 func branchKeys(m map[string]aggregator.WorktreeState) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
 	return out
-}
-
-func requireGit(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH; skipping fixture test")
-	}
 }

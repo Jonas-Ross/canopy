@@ -259,10 +259,13 @@ func worktreeBaseDir(repoRoot string) string {
 	return filepath.Join(repoRoot, ".worktrees")
 }
 
-// worktreePath maps a branch name to a worktree directory by replacing the
-// slashes with "+" — `git worktree list` parses one entry per directory and a
-// literal "/" would nest unexpectedly.
-func worktreePath(repoRoot, branch string) string {
+// WorktreePath returns the canonical filesystem path for a worktree of the
+// given branch under repoRoot. Slashes in the branch name are replaced with
+// "+" because a literal "/" would nest unexpectedly under
+// `git worktree list`. Exported so the validation fixture (internal/demo)
+// and any future tooling stay in lockstep with where createWorktreeCmd
+// actually places worktrees.
+func WorktreePath(repoRoot, branch string) string {
 	return filepath.Join(worktreeBaseDir(repoRoot), strings.ReplaceAll(branch, "/", "+"))
 }
 
@@ -271,7 +274,7 @@ func createWorktreeCmd(repoRoot, branch, base string) tea.Cmd {
 		if repoRoot == "" {
 			return worktreeCreatedMsg{branch: branch, err: fmt.Errorf("repo root unknown")}
 		}
-		path := worktreePath(repoRoot, branch)
+		path := WorktreePath(repoRoot, branch)
 		if err := os.MkdirAll(worktreeBaseDir(repoRoot), 0o755); err != nil {
 			return worktreeCreatedMsg{branch: branch, err: err}
 		}

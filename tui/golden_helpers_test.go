@@ -4,7 +4,6 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/jonasross/canopy/aggregator"
 	"github.com/jonasross/canopy/git"
+	"github.com/jonasross/canopy/internal/ansi"
 	"github.com/jonasross/canopy/pr"
 	"github.com/jonasross/canopy/procs"
 	"github.com/jonasross/canopy/sessions"
@@ -25,11 +25,10 @@ import (
 // Triggered with `go test ./tui -update`.
 var updateGoldens = flag.Bool("update", false, "rewrite golden files in tui/testdata/golden/")
 
-// ANSI escape regex used to strip styled output before comparing against text
-// goldens. Matches CSI SGR (...m) sequences only — sufficient for lipgloss.
-var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
+// stripANSI is a thin alias kept so existing tui_test code (ops_test.go,
+// model_test.go) can call a familiar local helper. New code should call
+// ansi.Strip directly.
+func stripANSI(s string) string { return ansi.Strip(s) }
 
 // goldenClock is the frozen reference time used by every fixture in this
 // suite. Picked far enough from real wall-clock that relative-time strings
@@ -40,9 +39,13 @@ func frozenNow() func() time.Time { return func() time.Time { return goldenClock
 
 func init() {
 	// Force lipgloss to emit ANSI escapes so render-time styling decisions
-	// (foreground, italic, bold, etc.) show up in the captured frame. We
-	// strip them before comparing against goldens; raw-frame assertions can
-	// inspect them directly.
+	// (foreground, italic, bold) show up in the captured frame. Goldens
+	// strip them before compare; raw-frame assertions inspect them directly.
+	//
+	// Side effect: every test in tui_test now runs against an ANSI-emitting
+	// renderer. Any new test that asserts on raw View() output must
+	// stripANSI first (or use ansi.Strip), otherwise substring checks will
+	// fail when styled spans get split by SGR escapes.
 	lipgloss.SetColorProfile(termenv.ANSI)
 }
 

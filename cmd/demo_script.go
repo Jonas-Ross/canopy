@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -14,12 +13,22 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jonasross/canopy/aggregator"
+	"github.com/jonasross/canopy/internal/ansi"
 	"github.com/jonasross/canopy/tui"
 )
 
-// ansiSGRRE matches CSI SGR (color/style) escapes; used to strip styling from
-// captured frames so text-mode goldens stay diffable.
-var ansiSGRRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+// Script directive kinds. Keep these strings in sync with docs/validation.md.
+const (
+	dirWidth      = "width"
+	dirHeight     = "height"
+	dirKeys       = "keys"
+	dirKey        = "key"
+	dirWait       = "wait"
+	dirResolve    = "resolve"
+	dirCapture    = "capture"
+	dirCapturePNG = "capture-png"
+	dirNote       = "note"
+)
 
 // runScript replays a directive file against the live aggregator + a freshly
 // built Model.
@@ -42,7 +51,10 @@ func runScript(ctx context.Context, cmd *cobra.Command, agg *aggregator.Aggregat
 	updates := agg.Subscribe(ctx)
 	defer agg.Close()
 
-	state := &scriptState{m: m, ctx: ctx, cobraCmd: cmd, updates: updates}
+	state := &scriptState{
+		m: m, ctx: ctx, cobraCmd: cmd, updates: updates,
+		width: width, height: height,
+	}
 
 	// Brief settle for the aggregator baseline.
 	time.Sleep(50 * time.Millisecond)
@@ -64,6 +76,10 @@ type scriptState struct {
 	ctx      context.Context
 	cobraCmd *cobra.Command
 	updates  <-chan aggregator.Update
+
+	// width and height track the last applied window size so width/height
+	// directives can update one dimension without resetting the other.
+	width, height int
 
 	// pending is the last tea.Cmd returned from Update that has not yet
 	// been resolved. flushed on wait / end-of-script.
@@ -92,10 +108,8 @@ func (s *scriptState) sendMsg(msg tea.Msg) {
 	s.pending = cmd
 }
 
-// flushPending resolves the queued tea.Cmd (if any) with a short timeout and
-// feeds the resulting message back into Update. One level of cascade is
-// chased — sufficient for the typical pattern (action cmd → result msg →
-// optional Refresh).
+// flushPending resolves any queued tea.Cmd and feeds its result back through
+// Update, with a short timeout so timer-based commands don't block.
 func (s *scriptState) flushPending() {
 	c := s.pending
 	s.pending = nil
@@ -158,22 +172,27 @@ func parseScript(path string) ([]scriptDirective, error) {
 
 func applyDirective(s *scriptState, d scriptDirective) error {
 	switch d.kind {
-	case "width", "height":
+	case dirWidth, dirHeight:
 		n, err := parseInt(d.arg)
 		if err != nil {
 			return err
 		}
-		s.sendMsg(windowSizeMsg(d.kind, n))
+		if d.kind == dirWidth {
+			s.width = n
+		} else {
+			s.height = n
+		}
+		s.sendMsg(tea.WindowSizeMsg{Width: s.width, Height: s.height})
 		return nil
 
-	case "keys":
+	case dirKeys:
 		for _, r := range d.arg {
 			s.flushPending() // resolve prior cmd before each new keypress
 			s.sendMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		}
 		return nil
 
-	case "key":
+	case dirKey:
 		typ, ok := namedKey(d.arg)
 		if !ok {
 			return fmt.Errorf("unknown named key %q (want one of: enter, esc, tab, shift-tab, up, down, left, right, backspace, space, ctrl-c)", d.arg)
@@ -182,7 +201,7 @@ func applyDirective(s *scriptState, d scriptDirective) error {
 		s.sendMsg(tea.KeyMsg{Type: typ})
 		return nil
 
-	case "wait":
+	case dirWait:
 		dur, err := time.ParseDuration(d.arg)
 		if err != nil {
 			return err
@@ -191,17 +210,17 @@ func applyDirective(s *scriptState, d scriptDirective) error {
 		time.Sleep(dur)
 		return nil
 
-	case "resolve":
+	case dirResolve:
 		s.flushPending()
 		return nil
 
-	case "capture":
-		return captureText(d.arg, s.m.View())
+	case dirCapture:
+		return writeFrame(d.arg, ansi.Strip(s.m.View()))
 
-	case "capture-png":
+	case dirCapturePNG:
 		return captureFramePNG(s.ctx, d.arg, s.m.View())
 
-	case "note":
+	case dirNote:
 		fmt.Fprintln(s.cobraCmd.ErrOrStderr(), "demo:", d.arg)
 		return nil
 
@@ -216,16 +235,6 @@ func parseInt(s string) (int, error) {
 		return 0, fmt.Errorf("expected integer, got %q: %w", s, err)
 	}
 	return n, nil
-}
-
-// windowSizeMsg builds a WindowSizeMsg for one named dimension; the other
-// is filled with a default. Scripts that need both should pair the
-// directives, which is the typical case.
-func windowSizeMsg(dim string, n int) tea.Msg {
-	if dim == "width" {
-		return tea.WindowSizeMsg{Width: n, Height: 40}
-	}
-	return tea.WindowSizeMsg{Width: 140, Height: n}
 }
 
 func namedKey(name string) (tea.KeyType, bool) {
@@ -256,12 +265,12 @@ func namedKey(name string) (tea.KeyType, bool) {
 	return 0, false
 }
 
-func captureText(path, view string) error {
+// writeFrame writes content to path, creating parent directories as needed.
+func writeFrame(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	stripped := ansiSGRRE.ReplaceAllString(view, "")
-	return os.WriteFile(path, []byte(stripped), 0o644)
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 func captureFramePNG(ctx context.Context, pngPath, view string) error {
