@@ -4,6 +4,7 @@ package procs
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -48,7 +49,7 @@ func TestSystemEnumerate_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := systemEnumerate(ctx)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context.Canceled, got %v", err)
 	}
 }
