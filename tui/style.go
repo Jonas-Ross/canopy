@@ -31,8 +31,11 @@ var (
 	syncStyle      = lipgloss.NewStyle().Foreground(colDim)
 	ageStyle       = lipgloss.NewStyle().Foreground(colDim)
 	modelStyle     = lipgloss.NewStyle().Foreground(colDim)
-	liveStyle      = lipgloss.NewStyle().Foreground(colGreen).Bold(true)
-	livePulseStyle = lipgloss.NewStyle().Foreground(colGreen).Bold(true).Background(colGreen)
+	liveStyle = lipgloss.NewStyle().Foreground(colGreen).Bold(true)
+	// Pulse is a brief flash: bright yellow ● for ~600ms after a fresh live
+	// event arrives. Distinct color so the glyph stays visible; no background
+	// fill (Background(colGreen) on a green glyph rendered as a solid block).
+	livePulseStyle = lipgloss.NewStyle().Foreground(colYellow).Bold(true)
 
 	// PR state
 	prStateOpenStyle    = lipgloss.NewStyle().Foreground(colGreen)

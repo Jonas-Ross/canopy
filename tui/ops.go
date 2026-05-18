@@ -53,6 +53,8 @@ type procsKilledMsg struct {
 
 type noticeClearedMsg struct{}
 
+type pulseExpiredMsg struct{}
+
 func (m Model) focusedState() (aggregator.WorktreeState, bool) {
 	if m.focusIndex < 0 || m.focusIndex >= len(m.ordered) {
 		return aggregator.WorktreeState{}, false

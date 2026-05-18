@@ -98,11 +98,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.repoRoot == "" && u.State.Repo.Root != "" {
 			m.repoRoot = u.State.Repo.Root
 		}
-		// Pulse if Live transitioned to non-nil OR Live.UpdatedAt advanced.
-		if u.State.Live != nil && (prev.Live == nil || u.State.Live.UpdatedAt.After(prev.Live.UpdatedAt)) {
+		// Pulse only on subsequent updates — initial load delivers all
+		// existing live sessions in one burst and shouldn't flash them.
+		if existed && u.State.Live != nil && (prev.Live == nil || u.State.Live.UpdatedAt.After(prev.Live.UpdatedAt)) {
 			m.pulsePath = u.Worktree
 			m.pulseUntil = m.now().Add(pulseDuration)
+			return m, tea.Tick(pulseDuration, func(time.Time) tea.Msg { return pulseExpiredMsg{} })
 		}
+		return m, nil
+
+	case pulseExpiredMsg:
+		// Just re-render; View() reads m.pulseUntil against now and stops
+		// rendering the pulse style once it has passed.
 		return m, nil
 
 	case prOpenedMsg:
