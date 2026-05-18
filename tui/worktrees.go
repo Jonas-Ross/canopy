@@ -210,7 +210,7 @@ func renderRow(state aggregator.WorktreeState, branch string, focused bool, now 
 	// same 2-cell slot with spaces so every row aligns on the branch col.
 	marker := "  "
 	if wt.Main {
-		marker = dimStyle.Render("⌂ ")
+		marker = primaryMarkerStyle.Render("⌂ ")
 	}
 
 	branchText := truncate(branch, opts.branchColW)
