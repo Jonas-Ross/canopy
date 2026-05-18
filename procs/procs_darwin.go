@@ -115,10 +115,62 @@ func readCWD(pid int32) (string, bool) {
 	return string(path[:end]), true
 }
 
-// readArgv is implemented in Task 5.
+// readArgv returns the argv vector of a pid via sysctl KERN_PROCARGS2.
+// The kernel returns a packed buffer:
+//
+//	int32 argc
+//	char  exec_path[]   // null-terminated, zero-padded
+//	char  argv[argc][]  // each null-terminated
+//	char  envp[]        // ignored
+//
+// Returns nil on any sysctl error (transient pid, permission denied,
+// short buffer). nil is the same shape Linux returns for kernel
+// threads, so callers treat both identically.
 func readArgv(pid int32) []string {
-	_ = pid
-	return nil
+	buf, err := unix.SysctlRaw("kern.procargs2", int(pid))
+	if err != nil || len(buf) < 4 {
+		return nil
+	}
+
+	argc := *(*int32)(unsafe.Pointer(&buf[0]))
+	if argc <= 0 {
+		return nil
+	}
+
+	// Skip the int32 argc header.
+	p := buf[4:]
+
+	// Skip exec_path: the first null-terminated string.
+	i := 0
+	for i < len(p) && p[i] != 0 {
+		i++
+	}
+	if i >= len(p) {
+		return nil
+	}
+	// Skip the null terminator AND any zero padding that follows.
+	for i < len(p) && p[i] == 0 {
+		i++
+	}
+	p = p[i:]
+
+	// Read argc null-terminated strings.
+	args := make([]string, 0, argc)
+	for len(args) < int(argc) && len(p) > 0 {
+		end := 0
+		for end < len(p) && p[end] != 0 {
+			end++
+		}
+		args = append(args, string(p[:end]))
+		if end >= len(p) {
+			break
+		}
+		p = p[end+1:]
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	return args
 }
 
 // commandFromArgs returns Args[0] basename, or "" if Args is empty.
