@@ -52,6 +52,18 @@ var runCmd = func(ctx context.Context, workingDir, name string, args ...string) 
 	return cmd.Output()
 }
 
+// RunCmdFunc is the shape of the exec seam swapped by SetRunCmd.
+type RunCmdFunc func(ctx context.Context, workingDir, name string, args ...string) ([]byte, error)
+
+// SetRunCmd replaces the package-level exec seam used by List. Returns the
+// previous value so callers (tests, the demo subcommand) can restore it.
+// Production code does not call this.
+func SetRunCmd(fn RunCmdFunc) RunCmdFunc {
+	prev := runCmd
+	runCmd = fn
+	return prev
+}
+
 // ghPR is the on-the-wire shape of one entry returned by
 // `gh pr list --json …`. Field names mirror the gh JSON keys.
 type ghPR struct {
