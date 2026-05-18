@@ -26,17 +26,9 @@ import (
 	"strings"
 )
 
-// enumerator is the package-level seam tests swap to inject a fake
-// process list. Production code leaves it nil and ListByCwdPrefixes
-// falls back to the platform-specific enumerate function.
-var enumerator func(context.Context) ([]Process, error)
-
-func currentEnumerator() func(context.Context) ([]Process, error) {
-	if enumerator != nil {
-		return enumerator
-	}
-	return enumerate
-}
+// enumerator is the platform enumerate function. Tests swap it to
+// inject a fake process list.
+var enumerator = enumerate
 
 // Process is one entry in the result of ListByCwdPrefix /
 // ListByCwdPrefixes.
@@ -100,7 +92,7 @@ func ListByCwdPrefix(ctx context.Context, prefix string) ([]Process, error) {
 // The context is honored at pid granularity; cancellation returns
 // ctx.Err() promptly without partial results.
 func ListByCwdPrefixes(ctx context.Context, prefixes []string) (map[string][]Process, error) {
-	all, err := currentEnumerator()(ctx)
+	all, err := enumerator(ctx)
 	if err != nil {
 		return nil, err
 	}
