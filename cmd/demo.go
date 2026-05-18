@@ -59,14 +59,21 @@ sandbox.`,
 
 		// Swap the gh exec seam for a fixture-JSON reader so pr.List
 		// returns the canned states without needing a real GitHub auth.
+		// Also stub LookPath: pr.List checks gh-on-PATH before invoking
+		// the run seam, so on machines without gh installed (CI hosts,
+		// demo viewers) we'd otherwise get ErrNoGH and lose PR columns.
 		prJSON, err := fix.PRFixtureBytes()
 		if err != nil {
 			return fmt.Errorf("canopy demo: read PR fixture: %w", err)
 		}
-		restore := pr.SetRunCmd(func(_ context.Context, _, _ string, _ ...string) ([]byte, error) {
+		restoreRun := pr.SetRunCmd(func(_ context.Context, _, _ string, _ ...string) ([]byte, error) {
 			return prJSON, nil
 		})
-		defer pr.SetRunCmd(restore)
+		defer pr.SetRunCmd(restoreRun)
+		restoreLook := pr.SetLookPath(func(name string) (string, error) {
+			return "/usr/bin/" + name, nil
+		})
+		defer pr.SetLookPath(restoreLook)
 
 		store, err := sessions.Open(fix.SessionsRoot)
 		if err != nil {

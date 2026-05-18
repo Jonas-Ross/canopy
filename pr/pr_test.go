@@ -184,6 +184,36 @@ func TestList_EmptyResult(t *testing.T) {
 	}
 }
 
+// SetLookPath is the public seam the demo subcommand uses to skip the
+// "gh on PATH" check on hosts without gh installed. Regression: without
+// it, swapping SetRunCmd alone is not enough — List returns ErrNoGH
+// before the run seam fires and the canned PR fixture never lands.
+func TestSetLookPath_AllowsRunCmdToFireOnHostWithoutGH(t *testing.T) {
+	// Public-seam flow: swap LookPath with SetLookPath; without restoring
+	// here we'd leak into the next test, hence the explicit restore.
+	origLook := SetLookPath(func(name string) (string, error) {
+		return "/fake/bin/" + name, nil
+	})
+	t.Cleanup(func() { SetLookPath(origLook) })
+
+	called := false
+	stubRun(t, func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		called = true
+		return []byte(fixtureHappy), nil
+	})
+
+	prs, err := List(context.Background(), "/tmp/repo")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if !called {
+		t.Fatalf("runCmd was not called; LookPath stub did not take effect")
+	}
+	if len(prs) == 0 {
+		t.Fatalf("len(prs)=0, want fixtureHappy entries")
+	}
+}
+
 func TestList_GhNotInstalled(t *testing.T) {
 	stubLookPath(t, exec.ErrNotFound)
 	// runCmd must not be called when gh is missing; install a stub

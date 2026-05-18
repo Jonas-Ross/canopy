@@ -83,6 +83,22 @@ func SetRunCmd(fn RunCmdFunc) RunCmdFunc {
 	return prev
 }
 
+// LookPathFunc is the shape of the PATH-lookup seam swapped by SetLookPath.
+type LookPathFunc func(name string) (string, error)
+
+// SetLookPath replaces the package-level exec.LookPath seam used by List's
+// gh-availability check. Returns the previous value so callers (tests, the
+// demo subcommand) can restore it. Without this, swapping SetRunCmd alone
+// isn't enough on hosts without gh installed: List would return ErrNoGH
+// before reaching the run seam.
+func SetLookPath(fn LookPathFunc) LookPathFunc {
+	seamsMu.Lock()
+	defer seamsMu.Unlock()
+	prev := lookPath
+	lookPath = fn
+	return prev
+}
+
 // ghPR is the on-the-wire shape of one entry returned by
 // `gh pr list --json …`. Field names mirror the gh JSON keys.
 type ghPR struct {
