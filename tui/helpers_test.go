@@ -103,6 +103,20 @@ func TestView_NegativeWidthClampedToMinimum(t *testing.T) {
 	}
 }
 
+// countViewRows returns the on-screen row count of view at the given width,
+// accounting for soft-wrap of lines wider than width.
+func countViewRows(view string, width int) int {
+	rows := 0
+	for _, line := range strings.Split(view, "\n") {
+		if line == "" {
+			rows++
+			continue
+		}
+		rows += (len([]rune(line)) + width - 1) / width
+	}
+	return rows
+}
+
 // TestView_NeverExceedsHeight pins the height-pad contract: the rendered
 // view must not exceed m.height on-screen rows, even when a footer
 // variant is wider than m.width and soft-wraps. The new-worktree footer
@@ -139,15 +153,7 @@ func TestView_NeverExceedsHeight(t *testing.T) {
 			m = tc.setup(m)
 
 			view := stripANSI(m.View())
-			rows := 0
-			for _, line := range strings.Split(view, "\n") {
-				if line == "" {
-					rows++
-					continue
-				}
-				rows += (len([]rune(line)) + tc.width - 1) / tc.width
-			}
-			if rows > tc.height {
+			if rows := countViewRows(view, tc.width); rows > tc.height {
 				t.Errorf("view rendered %d on-screen rows at width=%d, height=%d (overflow %d):\n%s",
 					rows, tc.width, tc.height, rows-tc.height, view)
 			}
@@ -155,10 +161,6 @@ func TestView_NeverExceedsHeight(t *testing.T) {
 	}
 }
 
-// TestView_NeverExceedsHeight_DetailPaneOverflow guards the height contract
-// when the focused worktree has a large process list. Without per-section
-// budgeting, the detail pane renders all procs unconditionally — the body
-// outgrows m.height and the terminal scrolls the top of the TUI off-screen.
 func TestView_NeverExceedsHeight_DetailPaneOverflow(t *testing.T) {
 	width, height := 160, 20
 	const procCount = 35
@@ -183,31 +185,17 @@ func TestView_NeverExceedsHeight_DetailPaneOverflow(t *testing.T) {
 	}))
 
 	view := stripANSI(m.View())
-	rows := 0
-	for _, line := range strings.Split(view, "\n") {
-		if line == "" {
-			rows++
-			continue
-		}
-		rows += (len([]rune(line)) + width - 1) / width
-	}
-	if rows > height {
+	if rows := countViewRows(view, width); rows > height {
 		t.Errorf("view rendered %d on-screen rows at width=%d, height=%d (overflow %d):\n%s",
 			rows, width, height, rows-height, view)
 	}
-	// The truncation surfaces as a "+N more" indicator inside the procs
-	// section — verify it's there so we know the cap is actually firing
-	// (rather than the test passing because procs all happened to fit).
+	// Defensive: assert the truncation actually fired, so the test can't
+	// silently pass if a future change makes all procs fit by coincidence.
 	if !strings.Contains(view, "more") {
 		t.Errorf("expected '+N more' indicator in truncated procs section; got:\n%s", view)
 	}
 }
 
-// TestRenderDetailPane_TinyHeightDoesNotOverflow guards the MaxHeight
-// backstop: at heights so small even the fixed top section overflows, the
-// pane must still cap at `height` rather than push the layout off-screen.
-// Procs-budgeting alone can't prevent this; the lipgloss MaxHeight call is
-// the safety net.
 func TestRenderDetailPane_TinyHeightDoesNotOverflow(t *testing.T) {
 	width, height := 160, 10
 
@@ -221,15 +209,7 @@ func TestRenderDetailPane_TinyHeightDoesNotOverflow(t *testing.T) {
 	}))
 
 	view := stripANSI(m.View())
-	rows := 0
-	for _, line := range strings.Split(view, "\n") {
-		if line == "" {
-			rows++
-			continue
-		}
-		rows += (len([]rune(line)) + width - 1) / width
-	}
-	if rows > height {
+	if rows := countViewRows(view, width); rows > height {
 		t.Errorf("view rendered %d on-screen rows at width=%d, height=%d (overflow %d):\n%s",
 			rows, width, height, rows-height, view)
 	}

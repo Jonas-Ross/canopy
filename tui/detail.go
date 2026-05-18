@@ -55,28 +55,19 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time, height int)
 	prSec := renderDetailPR(state)
 	sessionsSec := renderDetailSessions(state, now)
 
-	// The procs section is the only unbounded block — every other section has
-	// a small ceiling. When `height` is set (driven by m.height from
-	// WindowSizeMsg), budget procs against everything else so the assembled
-	// pane never grows past `height`. Without this, a worktree with many
-	// processes (e.g. the primary on a busy machine) would push the body
-	// past the terminal height and the alt-screen would scroll the title
-	// bar and worktree list off the top.
-	//
-	// budget = total rows the procs section may occupy (header + rows +
-	// optional "+N more"). -1 means "no constraint" (no WindowSizeMsg yet,
-	// or zero-height test fixtures).
+	// Procs is the only unbounded section; budget it so the pane fits
+	// within height. -1 means unconstrained.
 	procsBudget := -1
 	if height > 0 && len(state.Procs) > 0 {
 		nSections := 2 // top + procs
-		used := lineCount(top)
+		used := lipgloss.Height(top)
 		if prSec != "" {
 			nSections++
-			used += lineCount(prSec)
+			used += lipgloss.Height(prSec)
 		}
 		if sessionsSec != "" {
 			nSections++
-			used += lineCount(sessionsSec)
+			used += lipgloss.Height(sessionsSec)
 		}
 		procsBudget = height - used - (nSections - 1)
 		if procsBudget < 1 {
@@ -85,7 +76,8 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time, height int)
 	}
 	procsSec := renderDetailProcs(state.Procs, procsBudget)
 
-	sections := []string{top}
+	sections := make([]string, 0, 4)
+	sections = append(sections, top)
 	if prSec != "" {
 		sections = append(sections, prSec)
 	}
@@ -99,26 +91,23 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time, height int)
 
 	style := detailBorderStyle
 	if height > 0 {
-		// Height pads short content up to `height`; MaxHeight is the backstop
-		// that prevents overflow when the fixed sections alone would already
-		// exceed `height` (tiny terminal, dense PR/session metadata).
+		// MaxHeight backstops the case where the fixed sections alone
+		// already exceed height (tiny terminal); the procs budget can't
+		// guard that on its own.
 		style = style.Height(height).MaxHeight(height)
 	}
 	return style.Render(body)
 }
 
-// lineCount returns the visible row count of a section string, where each row
-// ends with "\n" except the last (sections are built without trailing
-// newlines). Empty strings count as zero rows.
-func lineCount(s string) int {
-	if s == "" {
-		return 0
+func writeDetailRow(sb *strings.Builder, label, value string) {
+	if value == "" {
+		return
 	}
-	return strings.Count(s, "\n") + 1
+	sb.WriteByte('\n')
+	sb.WriteString(detailLabelStyle.Render(fmt.Sprintf("%-*s", labelW, label)))
+	sb.WriteString(value)
 }
 
-// renderDetailTop renders the worktree header, path, and metadata rows
-// (commit/age/upstream/dirty). Returns a string with no trailing newline.
 func renderDetailTop(wt git.Worktree, now time.Time) string {
 	var sb strings.Builder
 	sb.Grow(256)
@@ -126,31 +115,21 @@ func renderDetailTop(wt git.Worktree, now time.Time) string {
 	sb.WriteString(detailHeaderStyle.Render(truncate(branch, detailContentW)))
 	sb.WriteByte('\n')
 	sb.WriteString(detailLabelStyle.Render(elidePath(wt.Path, detailContentW)))
-	// Blank line between the path and the metadata rows.
 	sb.WriteByte('\n')
 
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		sb.WriteByte('\n')
-		sb.WriteString(detailLabelStyle.Render(fmt.Sprintf("%-*s", labelW, label)))
-		sb.WriteString(value)
-	}
 	if wt.LastCommit.Subject != "" {
-		row("commit", detailValueStyle.Render(truncate(wt.LastCommit.Subject, valueW)))
+		writeDetailRow(&sb, "commit", detailValueStyle.Render(truncate(wt.LastCommit.Subject, valueW)))
 	}
-	row("age", detailValueStyle.Render(FormatRelativeTime(wt.LastCommit.When, now)))
+	writeDetailRow(&sb, "age", detailValueStyle.Render(FormatRelativeTime(wt.LastCommit.When, now)))
 	if wt.HasUpstream {
-		row("upstream", detailValueStyle.Render(FormatAheadBehind(wt.Ahead, wt.Behind, true)))
+		writeDetailRow(&sb, "upstream", detailValueStyle.Render(FormatAheadBehind(wt.Ahead, wt.Behind, true)))
 	} else {
-		row("upstream", detailLabelStyle.Render("(none)"))
+		writeDetailRow(&sb, "upstream", detailLabelStyle.Render("(none)"))
 	}
-	row("dirty", detailValueStyle.Render(dirtyCountString(wt.DirtyFiles)))
+	writeDetailRow(&sb, "dirty", detailValueStyle.Render(dirtyCountString(wt.DirtyFiles)))
 	return sb.String()
 }
 
-// renderDetailPR renders the PR header + rows. Returns "" when no PR.
 func renderDetailPR(state aggregator.WorktreeState) string {
 	if state.PR == nil {
 		return ""
@@ -159,19 +138,11 @@ func renderDetailPR(state aggregator.WorktreeState) string {
 	sb.Grow(192)
 	sb.WriteString(detailHeaderStyle.Render("PR"))
 
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		sb.WriteByte('\n')
-		sb.WriteString(detailLabelStyle.Render(fmt.Sprintf("%-*s", labelW, label)))
-		sb.WriteString(value)
-	}
-	row("number", detailValueStyle.Render(fmt.Sprintf("#%d", state.PR.Number)))
-	row("title", detailValueStyle.Render(truncate(state.PR.Title, valueW)))
-	row("state", prDetailState(*state.PR))
-	row("ci", prDetailCI(state.PR.CIRollup))
-	row("review", prDetailReview(state.PR.ReviewState))
+	writeDetailRow(&sb, "number", detailValueStyle.Render(fmt.Sprintf("#%d", state.PR.Number)))
+	writeDetailRow(&sb, "title", detailValueStyle.Render(truncate(state.PR.Title, valueW)))
+	writeDetailRow(&sb, "state", prDetailState(*state.PR))
+	writeDetailRow(&sb, "ci", prDetailCI(state.PR.CIRollup))
+	writeDetailRow(&sb, "review", prDetailReview(state.PR.ReviewState))
 	if state.PRStale {
 		sb.WriteByte('\n')
 		sb.WriteString(prStaleStyle.Render("(stale)"))
@@ -179,10 +150,8 @@ func renderDetailPR(state aggregator.WorktreeState) string {
 	return sb.String()
 }
 
-// renderDetailProcs renders the Processes header + capped proc rows. When
-// budget > 0 and len(list) would exceed budget, the section emits
-// (budget-1) proc rows plus a "+N more" line so the total occupies exactly
-// `budget` visible rows. budget <= 0 means render every proc unbounded.
+// renderDetailProcs caps the section so its visible rows fit `budget` (header
+// + procs + optional "+N more"). budget <= 0 means unbounded.
 func renderDetailProcs(list []procs.Process, budget int) string {
 	if len(list) == 0 {
 		return ""
@@ -194,9 +163,7 @@ func renderDetailProcs(list []procs.Process, budget int) string {
 	show := len(list)
 	hidden := 0
 	if budget > 0 {
-		// 1 row for the header — the rest of the budget is split between
-		// proc rows and (when truncating) the "+N more" line.
-		maxRows := budget - 1
+		maxRows := budget - 1 // header takes one row
 		if maxRows < 0 {
 			maxRows = 0
 		}
@@ -226,8 +193,6 @@ func renderDetailProcs(list []procs.Process, budget int) string {
 	return sb.String()
 }
 
-// renderDetailSessions renders the Sessions header + the live row + up to two
-// recent non-sidechain rows. Returns "" when nothing to show.
 func renderDetailSessions(state aggregator.WorktreeState, now time.Time) string {
 	if state.Live == nil && !hasRecentTopLevel(state.Recent) {
 		return ""
