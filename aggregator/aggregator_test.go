@@ -38,6 +38,7 @@ type fakeSources struct {
 	procsByPrefix func(prefix string) ([]procs.Process, error)
 	listWtCalls   *atomic.Int64 // optional counter; tests provide it to assert invocation
 	statusCalls   *atomic.Int64
+	procsCalls    *atomic.Int64 // optional counter; tests provide it to assert invocation
 }
 
 func (f *fakeSources) listWorktrees(ctx context.Context, repoRoot string) ([]git.Worktree, error) {
@@ -78,16 +79,32 @@ func (f *fakeSources) worktreeStatus(ctx context.Context, path string) (git.Work
 	return git.Worktree{Path: path}, nil
 }
 
-func (f *fakeSources) listProcs(ctx context.Context, prefix string) ([]procs.Process, error) {
+func (f *fakeSources) listProcsByPrefixes(ctx context.Context, prefixes []string) (map[string][]procs.Process, error) {
+	if f.procsCalls != nil {
+		f.procsCalls.Add(1)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.procsByPrefix != nil {
-		return f.procsByPrefix(prefix)
-	}
 	if f.procsErr != nil {
 		return nil, f.procsErr
 	}
-	return append([]procs.Process(nil), f.procs[prefix]...), nil
+	out := make(map[string][]procs.Process, len(prefixes))
+	for _, p := range prefixes {
+		if f.procsByPrefix != nil {
+			ps, err := f.procsByPrefix(p)
+			if err != nil {
+				return nil, err
+			}
+			out[p] = ps
+			continue
+		}
+		if ps := f.procs[p]; len(ps) > 0 {
+			out[p] = append([]procs.Process(nil), ps...)
+		} else {
+			out[p] = []procs.Process{}
+		}
+	}
+	return out, nil
 }
 
 // writeJSONLSession writes one fixture JSONL file under root with a
@@ -198,7 +215,7 @@ func TestSnapshot_SingleRepo_FullJoin(t *testing.T) {
 		PRCache:        prCache,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 
@@ -270,7 +287,7 @@ func TestSnapshot_NoPR(t *testing.T) {
 		PRCache:        prCache,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, err := a.Snapshot(context.Background())
@@ -305,7 +322,7 @@ func TestSnapshot_NoLiveSession(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, err := a.Snapshot(context.Background())
@@ -335,7 +352,7 @@ func TestSnapshot_NoSessionsAtAll(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, err := a.Snapshot(context.Background())
@@ -366,7 +383,7 @@ func TestSnapshot_NoProcs(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, _ := a.Snapshot(context.Background())
@@ -406,7 +423,7 @@ func TestSnapshot_NestedCwdMatchesCorrectly(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, err := a.Snapshot(context.Background())
@@ -486,7 +503,7 @@ func TestSnapshot_SessionMovedIntoNestedWorktreeOnlyAttributesToLast(t *testing.
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, err := a.Snapshot(context.Background())
@@ -550,7 +567,7 @@ func TestSnapshot_NestedWorktreeSessionsAttributeToDeepest(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, err := a.Snapshot(context.Background())
@@ -627,7 +644,7 @@ func TestSnapshot_DarwinProcsUnsupported(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, err := a.Snapshot(context.Background())
@@ -659,7 +676,7 @@ func TestSnapshot_PRStale(t *testing.T) {
 		PRCache:        prCache,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, _ := a.Snapshot(context.Background())
@@ -689,7 +706,7 @@ func TestSnapshot_GhNotInstalled(t *testing.T) {
 		PRCache:        prCache,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, err := a.Snapshot(context.Background())
@@ -717,7 +734,7 @@ func TestSnapshot_PRCacheNil(t *testing.T) {
 		PRCache:        nil,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, _ := a.Snapshot(context.Background())
@@ -744,7 +761,7 @@ func TestSnapshot_ListWorktreesFailure(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	_, err := a.Snapshot(context.Background())
@@ -783,7 +800,7 @@ func TestSnapshot_PerWorktreeStatusFailure(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, err := a.Snapshot(context.Background())
@@ -839,7 +856,7 @@ func TestSnapshot_PreservesMainAcrossStatusMerge(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	got, err := a.Snapshot(context.Background())
@@ -1004,6 +1021,45 @@ func withEmptyPath(t *testing.T) {
 // in repo root fixtures; if they appear they are passed through and
 // will trip the script.
 func shEscape(s string) string { return "'" + s + "'" }
+
+// TestRefreshAll_CallsProcsOnce ensures the batched procs walk fires
+// exactly once per Snapshot, not once per worktree. Regression check
+// for the N-walks-per-refresh waste fixed in the macOS port.
+func TestRefreshAll_CallsProcsOnce(t *testing.T) {
+	const repoRoot = "/repo"
+	wt1 := "/repo"
+	wt2 := "/repo/.wt/feat-a"
+	wt3 := "/repo/.wt/feat-b"
+
+	procsCalls := &atomic.Int64{}
+	fakes := &fakeSources{
+		worktrees: map[string][]git.Worktree{
+			repoRoot: {
+				{Path: wt1, Branch: "main"},
+				{Path: wt2, Branch: "feat-a"},
+				{Path: wt3, Branch: "feat-b"},
+			},
+		},
+		procsCalls: procsCalls,
+	}
+
+	store := openTestSessionStore(t, func(string) {})
+
+	a := newTestAggregator(t, Config{
+		Repos:               []Repo{{Root: repoRoot, Name: "repo"}},
+		SessionStore:        store,
+		listWorktrees:       fakes.listWorktrees,
+		worktreeStatus:      fakes.worktreeStatus,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
+	})
+
+	if _, err := a.Snapshot(context.Background()); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if got := procsCalls.Load(); got != 1 {
+		t.Errorf("listProcsByPrefixes calls = %d, want 1", got)
+	}
+}
 
 // renderGHJSON serializes a slice of PR into the gh CLI JSON shape
 // that pr.List parses. Only the fields List reads are emitted.

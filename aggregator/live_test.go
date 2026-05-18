@@ -49,7 +49,7 @@ func newLiveFixture(t *testing.T) *liveFixture {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 	return &liveFixture{a: a, f: fakes, repo: repo, wt1: wt1, wt2: wt2}
@@ -161,7 +161,7 @@ func TestRefreshByCwd_PreservesMainOnPrimary(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 
@@ -437,7 +437,7 @@ func TestTailEventTriggersRefresh(t *testing.T) {
 		SessionStore:   store,
 		listWorktrees:  fakes.listWorktrees,
 		worktreeStatus: fakes.worktreeStatus,
-		listProcs:      fakes.listProcs,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
 		now:            func() time.Time { return now },
 	})
 

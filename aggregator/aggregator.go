@@ -66,8 +66,8 @@ func withDefaults(cfg Config) Config {
 	if cfg.worktreeStatus == nil {
 		cfg.worktreeStatus = git.WorktreeStatus
 	}
-	if cfg.listProcs == nil {
-		cfg.listProcs = procs.ListByCwdPrefix
+	if cfg.listProcsByPrefixes == nil {
+		cfg.listProcsByPrefixes = procs.ListByCwdPrefixes
 	}
 	if cfg.now == nil {
 		cfg.now = time.Now
@@ -88,9 +88,11 @@ func withDefaults(cfg Config) Config {
 // from ListWorktrees and do not abort the snapshot. List-worktrees
 // failure for a repo aborts the snapshot and is returned wrapped.
 func (a *Aggregator) Snapshot(ctx context.Context) ([]WorktreeState, error) {
+	prefixes := a.collectPrefixes(ctx)
+	pbp := a.procsSnapshot(ctx, prefixes)
 	var out []WorktreeState
 	err := a.walkAll(ctx, func(repo Repo, wt git.Worktree, siblings []string, prs []pr.PR, prStale bool) {
-		out = append(out, a.buildState(ctx, repo, wt, siblings, prs, prStale))
+		out = append(out, a.buildState(ctx, repo, wt, siblings, prs, prStale, pbp))
 	}, nil)
 	if err != nil {
 		return nil, err
@@ -128,12 +130,47 @@ func (a *Aggregator) walkAll(ctx context.Context, visit func(repo Repo, wt git.W
 	return nil
 }
 
+// collectPrefixes enumerates every worktree path across configured
+// repos so a single batched procs call covers them all. Errors during
+// list-worktrees fall through as a missing entry; the corresponding
+// worktree just won't have its prefix in the bucket map, and
+// buildState will leave Procs empty for that one.
+func (a *Aggregator) collectPrefixes(ctx context.Context) []string {
+	out := make([]string, 0)
+	for _, repo := range a.cfg.Repos {
+		wts, err := a.cfg.listWorktrees(ctx, repo.Root)
+		if err != nil {
+			continue
+		}
+		for _, wt := range wts {
+			out = append(out, wt.Path)
+		}
+	}
+	return out
+}
+
+// procsSnapshot is a one-shot batched procs walk across every prefix
+// the caller cares about. Failures are soft-degraded: an error returns
+// an empty map so buildState's bucket lookup simply finds no entry
+// and leaves Procs as the zero slice. Same shape as the per-pid
+// silent-skip behavior in procs/.
+func (a *Aggregator) procsSnapshot(ctx context.Context, prefixes []string) map[string][]procs.Process {
+	if len(prefixes) == 0 {
+		return map[string][]procs.Process{}
+	}
+	m, err := a.cfg.listProcsByPrefixes(ctx, prefixes)
+	if err != nil {
+		return map[string][]procs.Process{}
+	}
+	return m
+}
+
 // buildState joins git/pr/procs/session data for one worktree. siblings is
 // the list of every worktree path in the same repo — used to attribute a
 // prefix-matched session or process to the deepest containing worktree
 // (e.g. a session under /repo/.worktrees/feat must NOT also appear under
 // /repo).
-func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree, siblings []string, prList []pr.PR, prStale bool) WorktreeState {
+func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree, siblings []string, prList []pr.PR, prStale bool, procsByPrefix map[string][]procs.Process) WorktreeState {
 	state := WorktreeState{
 		Repo:      repo,
 		Worktree:  wt,
@@ -149,7 +186,7 @@ func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree,
 		state.Worktree = full
 	}
 
-	if ps, err := a.cfg.listProcs(ctx, state.Worktree.Path); err == nil && ps != nil {
+	if ps, ok := procsByPrefix[state.Worktree.Path]; ok {
 		state.Procs = ps[:0]
 		for _, p := range ps {
 			if longestMatchingPath(p.Cwd, siblings) == state.Worktree.Path {
