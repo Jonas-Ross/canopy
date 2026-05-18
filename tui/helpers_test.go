@@ -101,10 +101,10 @@ func TestView_NegativeWidthClampedToMinimum(t *testing.T) {
 }
 
 // TestView_NeverExceedsHeight pins the height-pad contract: the rendered
-// view must not exceed m.height on-screen rows, even when a footer variant
-// is wider than m.width and soft-wraps. The new-worktree footer at width=80
-// is the known wrap case — guarding it here keeps the alt-screen from
-// scrolling the footer off the bottom (a P2 Codex finding on #32).
+// view must not exceed m.height on-screen rows, even when a footer
+// variant is wider than m.width and soft-wraps. The new-worktree footer
+// at width=80 is the known wrap case — without this guard the alt-screen
+// would scroll the footer off the bottom.
 func TestView_NeverExceedsHeight(t *testing.T) {
 	cases := []struct {
 		name          string

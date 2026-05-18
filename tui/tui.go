@@ -402,11 +402,10 @@ func (m Model) activeFilter() string {
 	return m.filterStr
 }
 
-// wrappedRows returns the on-screen row count for s when rendered at the
-// given column width. Unlike lipgloss.Height (which counts only explicit
-// newlines), this accounts for soft-wrapping that the terminal applies to
-// lines wider than width — without it, footer/title variants that exceed
-// width get undercounted and the pad math overshoots m.height.
+// wrappedRows returns the on-screen row count for s at the given column
+// width, accounting for terminal soft-wrap. lipgloss.Height counts only
+// explicit newlines, which undercounts the new-worktree footer and the
+// title/footer rule-fills (they overshoot width by 1–4 chars).
 func wrappedRows(s string, width int) int {
 	if width <= 0 {
 		return lipgloss.Height(s)
@@ -454,20 +453,12 @@ func (m Model) View() string {
 
 	footer := m.renderFooter(width)
 
-	// Pin the footer to the bottom of the terminal so the layout has a
-	// stable height — without this, body height changes (focus moving onto
-	// a worktree with a tall detail pane, items appearing/disappearing)
-	// cause the alt-screen to redraw with a different line count and the
-	// footer visibly jumps. Structure: title + blank + body + blank +
-	// footer == m.height. When detail is showing, the body's two columns
-	// are stretched to bodyTargetH so the pane's left border runs the full
-	// height; otherwise we pad below the list with blank lines. Skip when
-	// m.height is unset.
-	//
-	// Use wrappedRows for footer/title — the new-worktree footer can be
-	// wider than `width` and wrap to 2+ on-screen rows; lipgloss.Height
-	// only counts explicit \n, so without this we overpad and the footer
-	// drops off the bottom of the alt-screen.
+	// Pin the footer to the bottom so the layout has a stable height —
+	// otherwise body-height changes (focus moving onto a tall detail pane,
+	// items appearing under a filter) make the alt-screen redraw at a
+	// different row count and the footer visibly jumps. The body is either
+	// stretched (detail pane present → pane border runs full height) or
+	// padded below (list-only). Skip when m.height is unset.
 	bodyTargetH := 0
 	if m.height > 0 {
 		bodyTargetH = m.height - wrappedRows(title, width) - 1 - 1 - wrappedRows(footer, width)
