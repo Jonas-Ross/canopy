@@ -164,23 +164,27 @@ func (a *Aggregator) refreshAll(
 	prErrs map[string]error,
 	broadcast bool,
 ) {
-	procsByPrefix := a.procsSnapshot(ctx, a.collectPrefixes(ctx))
-	seen := make(map[string]struct{})
+	var visits []visit
 	_ = a.walkAll(ctx,
 		func(repo Repo, wt git.Worktree, siblings []string, prs []pr.PR, prStale bool) {
-			seen[wt.Path] = struct{}{}
-			pathToRepo[wt.Path] = repo
-			next := a.buildState(ctx, repo, wt, siblings, prs, prStale, procsByPrefix)
-			prev, had := state[wt.Path]
-			state[wt.Path] = next
-			if broadcast && (!had || !worktreeStatesEqual(prev, next)) {
-				a.broadcast(subscribers, Update{Worktree: wt.Path, State: next})
-			}
+			visits = append(visits, visit{repo, wt, siblings, prs, prStale})
 		},
 		func(repoRoot string, err error) {
 			a.observePRErr(repoRoot, err, subscribers, prErrs, broadcast)
 		},
 	)
+	procsByPrefix := a.procsSnapshot(ctx, visitPrefixes(visits))
+	seen := make(map[string]struct{}, len(visits))
+	for _, v := range visits {
+		seen[v.wt.Path] = struct{}{}
+		pathToRepo[v.wt.Path] = v.repo
+		next := a.buildState(ctx, v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix)
+		prev, had := state[v.wt.Path]
+		state[v.wt.Path] = next
+		if broadcast && (!had || !worktreeStatesEqual(prev, next)) {
+			a.broadcast(subscribers, Update{Worktree: v.wt.Path, State: next})
+		}
+	}
 	for path := range state {
 		if _, ok := seen[path]; !ok {
 			delete(state, path)

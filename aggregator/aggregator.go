@@ -80,6 +80,17 @@ func withDefaults(cfg Config) Config {
 	return cfg
 }
 
+// visit is one (repo, worktree) tuple captured during walkAll, used to
+// defer buildState calls until after a single batched procs snapshot
+// has been taken across every worktree in the walk.
+type visit struct {
+	repo     Repo
+	wt       git.Worktree
+	siblings []string
+	prs      []pr.PR
+	prStale  bool
+}
+
 // Snapshot returns the current state of every worktree across all
 // configured Repos. Synchronous; runs git/procs/pr/sessions queries
 // inline. Safe to call before Start.
@@ -88,16 +99,29 @@ func withDefaults(cfg Config) Config {
 // from ListWorktrees and do not abort the snapshot. List-worktrees
 // failure for a repo aborts the snapshot and is returned wrapped.
 func (a *Aggregator) Snapshot(ctx context.Context) ([]WorktreeState, error) {
-	prefixes := a.collectPrefixes(ctx)
-	procsByPrefix := a.procsSnapshot(ctx, prefixes)
-	var out []WorktreeState
+	var visits []visit
 	err := a.walkAll(ctx, func(repo Repo, wt git.Worktree, siblings []string, prs []pr.PR, prStale bool) {
-		out = append(out, a.buildState(ctx, repo, wt, siblings, prs, prStale, procsByPrefix))
+		visits = append(visits, visit{repo, wt, siblings, prs, prStale})
 	}, nil)
 	if err != nil {
 		return nil, err
 	}
+	procsByPrefix := a.procsSnapshot(ctx, visitPrefixes(visits))
+	out := make([]WorktreeState, 0, len(visits))
+	for _, v := range visits {
+		out = append(out, a.buildState(ctx, v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix))
+	}
 	return out, nil
+}
+
+// visitPrefixes extracts the worktree paths from a slice of visits,
+// preserving order. Used to feed procsSnapshot.
+func visitPrefixes(visits []visit) []string {
+	prefixes := make([]string, len(visits))
+	for i, v := range visits {
+		prefixes[i] = v.wt.Path
+	}
+	return prefixes
 }
 
 // walkAll iterates every (repo, worktree) pair across configured Repos,
@@ -128,25 +152,6 @@ func (a *Aggregator) walkAll(ctx context.Context, visit func(repo Repo, wt git.W
 		}
 	}
 	return nil
-}
-
-// collectPrefixes enumerates every worktree path across configured
-// repos so a single batched procs call covers them all. Errors during
-// list-worktrees fall through as a missing entry; the corresponding
-// worktree just won't have its prefix in the bucket map, and
-// buildState will leave Procs empty for that one.
-func (a *Aggregator) collectPrefixes(ctx context.Context) []string {
-	var out []string
-	for _, repo := range a.cfg.Repos {
-		wts, err := a.cfg.listWorktrees(ctx, repo.Root)
-		if err != nil {
-			continue
-		}
-		for _, wt := range wts {
-			out = append(out, wt.Path)
-		}
-	}
-	return out
 }
 
 // procsSnapshot is a one-shot batched procs walk across every prefix
