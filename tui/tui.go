@@ -483,8 +483,16 @@ func (m Model) renderFooter(width int) string {
 		return "  " + m.notice
 	}
 
+	// Prune is structurally invalid on the primary worktree (git itself
+	// refuses), so omit it from the help footer when that row is focused.
+	focused, hasFocus := m.focusedState()
+	hidePrune := hasFocus && focused.Worktree.Main
+
 	var chunks []string
 	for _, b := range footerKeys {
+		if hidePrune && b.key == "d" {
+			continue
+		}
 		chunks = append(chunks, keyStyle.Render(b.key)+" "+keyDescStyle.Render(b.desc))
 	}
 	help := strings.Join(chunks, "  "+keyDescStyle.Render("·")+"  ")
