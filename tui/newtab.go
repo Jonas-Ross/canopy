@@ -83,14 +83,20 @@ func spawnWezTermTab(dir string) error {
 // the cd command. Used for terminals (Ghostty, Warp) that have no stable
 // AppleScript verb for "new tab in cwd". Needs Accessibility permission
 // for "System Events" on first run.
+//
+// The 0.4s delay after Cmd-T is to outwait zsh's startup so the prompt is
+// rendered before we start typing — otherwise the `cd` keystroke arrives
+// before the shell is ready and Return gets dropped on the floor. The
+// shorter delay before Return is so it doesn't merge with the cd keystroke.
 func spawnKeystrokeTab(appName, dir string) error {
 	shellCmd := "cd " + shellSingleQuote(dir)
 	script := `tell application ` + appleScriptString(appName) + ` to activate
-delay 0.05
+delay 0.1
 tell application "System Events"
 	keystroke "t" using {command down}
-	delay 0.1
+	delay 0.4
 	keystroke ` + appleScriptString(shellCmd) + `
+	delay 0.1
 	key code 36
 end tell`
 	return runCapturingStderr(exec.Command("osascript", "-e", script))
