@@ -34,3 +34,6 @@ go.work.sum
 *.swo
 .worktrees/
 .claude/issue-runs/
+
+# canopy demo capture-png outputs — generated on demand, never committed
+tui/testdata/golden/png/

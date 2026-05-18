@@ -114,12 +114,14 @@ func freezeAvailable() bool {
 }
 
 // renderPNG shells out to `freeze` to turn an ANSI input file into a PNG.
-// Surfaces a friendly install hint when freeze is missing.
+// Surfaces a friendly install hint when freeze is missing. The `ansi`
+// language tells freeze to render raw ANSI escapes rather than try to
+// syntax-highlight the content as code.
 func renderPNG(ctx context.Context, ansiPath, pngPath string) error {
 	if !freezeAvailable() {
 		return fmt.Errorf("freeze binary %q not on PATH; install with: go install github.com/charmbracelet/freeze@latest", demoFreezeIn)
 	}
-	c := exec.CommandContext(ctx, demoFreezeIn, "--output", pngPath, ansiPath)
+	c := exec.CommandContext(ctx, demoFreezeIn, "--language", "ansi", "--output", pngPath, ansiPath)
 	if out, err := c.CombinedOutput(); err != nil {
 		return fmt.Errorf("freeze: %w: %s", err, string(out))
 	}
