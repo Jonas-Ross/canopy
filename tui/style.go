@@ -69,6 +69,11 @@ var (
 	keyStyle     = lipgloss.NewStyle().Foreground(colFG).Bold(true)
 	keyDescStyle = lipgloss.NewStyle().Foreground(colDim)
 	dimStyle     = lipgloss.NewStyle().Foreground(colDim)
+
+	// primaryMarkerStyle has to read at a glance on dark terminals — cyan
+	// matches the repo-identity accent in the title bar, and bold compensates
+	// for the small ⌂ glyph that otherwise vanishes against a low-contrast bg.
+	primaryMarkerStyle = lipgloss.NewStyle().Foreground(colCyan).Bold(true)
 )
 
 // Per-column width wrappers hoisted to package scope so repaints don't

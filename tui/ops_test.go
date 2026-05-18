@@ -139,6 +139,86 @@ func TestUpdate_PruneKey_EntersConfirmMode(t *testing.T) {
 	}
 }
 
+// The primary worktree row gets a leading ⌂ marker; non-primary rows
+// pad the same slot with spaces so columns stay aligned.
+func TestView_PrimaryWorktreeMarker(t *testing.T) {
+	rf := &fakeRefresher{}
+	m := tui.NewModel(rf)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 220, Height: 40})
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/r",
+		State: aggregator.WorktreeState{
+			Repo:     aggregator.Repo{Root: "/r", Name: "r"},
+			Worktree: git.Worktree{Path: "/r", Branch: "main", Main: true},
+		},
+	}))
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/r/wt-a",
+		State: aggregator.WorktreeState{
+			Repo:     aggregator.Repo{Root: "/r", Name: "r"},
+			Worktree: git.Worktree{Path: "/r/wt-a", Branch: "feat/a"},
+		},
+	}))
+
+	view := stripANSI(m.View())
+	mainLine := findLineContaining(t, view, "main")
+	featLine := findLineContaining(t, view, "feat/a")
+
+	if !strings.Contains(mainLine, "⌂") {
+		t.Errorf("primary row missing ⌂ marker: %q", mainLine)
+	}
+	if strings.Contains(featLine, "⌂") {
+		t.Errorf("non-primary row has ⌂ marker (must be primary-only): %q", featLine)
+	}
+}
+
+// The default help footer hides `d prune` while the primary worktree is
+// focused — git itself refuses worktree-remove there, so the affordance
+// would be misleading.
+func TestView_FooterHidesPruneOnPrimary(t *testing.T) {
+	rf := &fakeRefresher{}
+	m := tui.NewModel(rf)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 220, Height: 40})
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/r",
+		State: aggregator.WorktreeState{
+			Repo:     aggregator.Repo{Root: "/r", Name: "r"},
+			Worktree: git.Worktree{Path: "/r", Branch: "main", Main: true},
+		},
+	}))
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/r/wt-a",
+		State: aggregator.WorktreeState{
+			Repo:     aggregator.Repo{Root: "/r", Name: "r"},
+			Worktree: git.Worktree{Path: "/r/wt-a", Branch: "feat/a"},
+		},
+	}))
+
+	// Focused on primary (index 0) — `d prune` must be absent.
+	view := stripANSI(m.View())
+	if strings.Contains(view, "d prune") {
+		t.Errorf("footer shows 'd prune' with primary focused; want it hidden. view=%q", view)
+	}
+
+	// Move focus to the non-primary row — `d prune` must return.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	view = stripANSI(m.View())
+	if !strings.Contains(view, "d prune") {
+		t.Errorf("footer missing 'd prune' with non-primary focused; want it shown. view=%q", view)
+	}
+}
+
+func findLineContaining(t *testing.T, s, needle string) string {
+	t.Helper()
+	for _, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	t.Fatalf("no line containing %q in:\n%s", needle, s)
+	return ""
+}
+
 // Regression: pressing d on the primary worktree must not arm the prune flow.
 func TestUpdate_PruneKey_OnMainWorktree_NoConfirm(t *testing.T) {
 	rf := &fakeRefresher{}

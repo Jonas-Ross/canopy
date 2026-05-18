@@ -206,6 +206,13 @@ func renderRow(state aggregator.WorktreeState, branch string, focused bool, now 
 		cursor = focusCursor.Render(" ▍ ")
 	}
 
+	// Primary worktree gets a leading ⌂ glyph; non-primary rows pad the
+	// same 2-cell slot with spaces so every row aligns on the branch col.
+	marker := "  "
+	if wt.Main {
+		marker = primaryMarkerStyle.Render("⌂ ")
+	}
+
 	branchText := truncate(branch, opts.branchColW)
 	branchColStyle := lipgloss.NewStyle().Width(opts.branchColW)
 	switch {
@@ -223,7 +230,7 @@ func renderRow(state aggregator.WorktreeState, branch string, focused bool, now 
 	statusCol := statusColStyle.Render(renderStatus(wt.DirtyFiles, wt.Ahead, wt.Behind, wt.HasUpstream))
 
 	parts := make([]string, 0, 16)
-	parts = append(parts, cursor, branchCol, "  ", statusCol)
+	parts = append(parts, cursor, marker, branchCol, "  ", statusCol)
 
 	if opts.width >= prVisibleWidth {
 		parts = append(parts, "  ", prColStyle.Render(renderPRCol(state.PR, state.PRStale)))

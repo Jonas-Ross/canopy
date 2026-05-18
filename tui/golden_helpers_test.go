@@ -54,6 +54,7 @@ type fixtureWorktree struct {
 	Path       string
 	Branch     string
 	Detached   bool
+	Main       bool
 	Dirty      int
 	HasUp      bool
 	Ahead      int
@@ -74,6 +75,7 @@ func toState(f fixtureWorktree) aggregator.WorktreeState {
 			Path:        f.Path,
 			Branch:      f.Branch,
 			Detached:    f.Detached,
+			Main:        f.Main,
 			DirtyFiles:  f.Dirty,
 			HasUpstream: f.HasUp,
 			Ahead:       f.Ahead,
@@ -108,7 +110,7 @@ func scenarioFixtures() []fixtureWorktree {
 	}
 	return []fixtureWorktree{
 		{
-			Path: "/tmp/canopy-demo/repo", Branch: "main",
+			Path: "/tmp/canopy-demo/repo", Branch: "main", Main: true,
 			CommitWhen: goldenClock.Add(-2 * time.Hour),
 			Subject:    "init",
 		},
