@@ -6,27 +6,36 @@
 //
 // Portability:
 //
-//   - Linux is first-class. The implementation walks /proc/<pid>/cwd
-//     via os.Readlink plus /proc/<pid>/comm and /proc/<pid>/cmdline.
-//   - macOS and other platforms return ErrUnsupported. Callers should
-//     treat this as "no process data available" and degrade gracefully,
-//     not as a hard failure.
+//   - macOS is first-class. The darwin implementation enumerates pids
+//     via the proc_info syscall and reads cwd + argv via
+//     proc_pidinfo and KERN_PROCARGS2, with no cgo.
+//   - Linux is supported. /proc/<pid>/cwd, /comm, /cmdline.
+//   - Other platforms (windows, *bsd, plan9, …) return ErrUnsupported.
+//     Callers should treat this as "no process data available" and
+//     degrade gracefully, not as a hard failure.
 //
-// The package has no third-party dependencies and shells out to
-// nothing. It is safe for concurrent use; ListByCwdPrefix is stateless.
+// The package has no third-party runtime dependencies beyond
+// golang.org/x/sys/unix on darwin. It is safe for concurrent use; both
+// list entry points are stateless.
 package procs
 
-import "errors"
+import (
+	"context"
+	"errors"
+	"sort"
+	"strings"
+)
 
-// Process is one entry in the result of ListByCwdPrefix.
+// Process is one entry in the result of ListByCwdPrefix /
+// ListByCwdPrefixes.
 //
 // Pid is the kernel pid. Cwd is the absolute path the kernel reports
 // for the process's current working directory at the moment of the
 // walk; treat it as a snapshot. Command is the executable basename
-// (e.g. "claude"), sourced from /proc/<pid>/comm on Linux. Args is the
-// process command line as a slice in argv order, sourced from
-// /proc/<pid>/cmdline on Linux; the leading element is conventionally
-// the program name.
+// (e.g. "claude") — sourced from /proc/<pid>/comm on linux, derived
+// from argv[0] basename on darwin. Args is the process command line
+// as a slice in argv order; the leading element is conventionally the
+// program name.
 type Process struct {
 	Pid     int
 	Cwd     string
@@ -34,8 +43,68 @@ type Process struct {
 	Args    []string
 }
 
-// ErrUnsupported is returned by ListByCwdPrefix on platforms that do
-// not yet have an implementation (currently: anything but Linux).
-// Callers should match it with errors.Is and treat the result as "no
-// data available" rather than a hard error.
+// ErrUnsupported is returned by the list functions on platforms that
+// do not yet have an enumerator (currently: anything other than darwin
+// or linux). Callers should match it with errors.Is and treat the
+// result as "no data available" rather than a hard error.
 var ErrUnsupported = errors.New("procs: platform not supported")
+
+// ListByCwdPrefix returns processes whose cwd has the given prefix.
+//
+// Bare paths are matched as exact-prefix (so "/work/canopy" matches
+// "/work/canopy" and "/work/canopy-feature"); pass a trailing slash to
+// require a directory boundary (e.g. "/work/canopy/"). An empty
+// prefix matches every process the caller can see.
+//
+// Per-pid errors during enumeration (process exited mid-walk, EACCES
+// on another user's process) are swallowed silently so a single
+// unreadable entry does not abort the listing. The result is sorted
+// by Pid ascending for determinism, and is always non-nil so callers
+// can range over the result unconditionally.
+//
+// The context is honored at pid granularity; cancellation returns
+// ctx.Err() promptly without partial results.
+func ListByCwdPrefix(ctx context.Context, prefix string) ([]Process, error) {
+	buckets, err := ListByCwdPrefixes(ctx, []string{prefix})
+	if err != nil {
+		return nil, err
+	}
+	return buckets[prefix], nil
+}
+
+// ListByCwdPrefixes returns processes grouped by which prefix they
+// match, using a single enumeration of the process table.
+//
+// A process whose cwd matches multiple prefixes appears under EACH
+// matching prefix. The caller is responsible for any longest-prefix
+// deduplication (the aggregator does this against its siblings list).
+//
+// Bare paths are matched as exact-prefix; pass a trailing slash to
+// require a directory boundary. An empty prefix in the slice matches
+// every visible process. Prefixes with zero matches map to an empty
+// (non-nil) slice. The result map always has one entry per input
+// prefix. Ordering within each bucket is Pid ascending.
+//
+// The context is honored at pid granularity; cancellation returns
+// ctx.Err() promptly without partial results.
+func ListByCwdPrefixes(ctx context.Context, prefixes []string) (map[string][]Process, error) {
+	all, err := enumerate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]Process, len(prefixes))
+	for _, p := range prefixes {
+		out[p] = []Process{}
+	}
+	for _, proc := range all {
+		for _, p := range prefixes {
+			if strings.HasPrefix(proc.Cwd, p) {
+				out[p] = append(out[p], proc)
+			}
+		}
+	}
+	for p := range out {
+		sort.Slice(out[p], func(i, j int) bool { return out[p][i].Pid < out[p][j].Pid })
+	}
+	return out, nil
+}
