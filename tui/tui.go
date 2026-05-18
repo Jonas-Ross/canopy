@@ -135,7 +135,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case shellDroppedMsg:
 		if msg.err != nil {
-			m.notice = errorStyle.Render("shell exited with error: " + msg.err.Error())
+			m.notice = errorStyle.Render("open shell tab failed: " + msg.err.Error())
 		}
 		return m, nil
 

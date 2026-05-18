@@ -1,10 +1,8 @@
 package tui
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,22 +96,9 @@ func openURLCmd(url string) tea.Cmd {
 		default:
 			c = exec.Command("xdg-open", url)
 		}
-		// Capture stderr so a non-zero exit (xdg-open returns 3 for
-		// "no method available", 4 for "action failed") surfaces the
-		// actual reason rather than a generic "exit status N". Run is
-		// short — open/xdg-open exit quickly after handing off to the
-		// browser.
-		var stderr bytes.Buffer
-		c.Stdout = io.Discard
-		c.Stderr = &stderr
-		if err := c.Run(); err != nil {
-			msg := strings.TrimSpace(stderr.String())
-			if msg == "" {
-				msg = err.Error()
-			}
-			return prOpenedMsg{err: fmt.Errorf("%s", msg)}
-		}
-		return prOpenedMsg{}
+		// xdg-open's exit codes (3 "no method available", 4 "action failed")
+		// only tell you it broke; the helpful message lives on stderr.
+		return prOpenedMsg{err: runCapturingStderr(c)}
 	}
 }
 
@@ -137,18 +122,19 @@ func (m Model) handleShellDrop() (Model, tea.Cmd) {
 		return m, nil
 	}
 	if isDemoMode() {
-		m.notice = noticeStyle.Render("demo: would drop into shell at " + state.Worktree.Path)
+		m.notice = noticeStyle.Render("demo: would open shell tab at " + state.Worktree.Path)
 		return m, nil
 	}
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
+	return m, openShellTabCmd(state.Worktree.Path)
+}
+
+// openShellTabCmd's shellDroppedMsg carries the *spawn* result — it does
+// not represent the shell's eventual exit (which the old tea.ExecProcess
+// path did).
+func openShellTabCmd(dir string) tea.Cmd {
+	return func() tea.Msg {
+		return shellDroppedMsg{err: openShellTab(dir)}
 	}
-	c := exec.Command(shell)
-	c.Dir = state.Worktree.Path
-	return m, tea.ExecProcess(c, func(err error) tea.Msg {
-		return shellDroppedMsg{err: err}
-	})
 }
 
 func (m Model) startPrune() (Model, tea.Cmd) {
