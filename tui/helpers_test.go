@@ -1,12 +1,15 @@
 package tui_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jonasross/canopy/aggregator"
+	"github.com/jonasross/canopy/git"
+	"github.com/jonasross/canopy/procs"
 	"github.com/jonasross/canopy/tui"
 )
 
@@ -149,5 +152,85 @@ func TestView_NeverExceedsHeight(t *testing.T) {
 					rows, tc.width, tc.height, rows-tc.height, view)
 			}
 		})
+	}
+}
+
+// TestView_NeverExceedsHeight_DetailPaneOverflow guards the height contract
+// when the focused worktree has a large process list. Without per-section
+// budgeting, the detail pane renders all procs unconditionally — the body
+// outgrows m.height and the terminal scrolls the top of the TUI off-screen.
+func TestView_NeverExceedsHeight_DetailPaneOverflow(t *testing.T) {
+	width, height := 160, 20
+	const procCount = 35
+
+	procList := make([]procs.Process, procCount)
+	for i := range procList {
+		procList[i] = procs.Process{
+			Pid:     10000 + i,
+			Cwd:     "/repo/main",
+			Command: fmt.Sprintf("worker-%d", i),
+		}
+	}
+
+	m := tui.NewModel(&fakeRefresher{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/repo/main",
+		State: aggregator.WorktreeState{
+			Worktree: git.Worktree{Path: "/repo/main", Branch: "main", Main: true},
+			Procs:    procList,
+		},
+	}))
+
+	view := stripANSI(m.View())
+	rows := 0
+	for _, line := range strings.Split(view, "\n") {
+		if line == "" {
+			rows++
+			continue
+		}
+		rows += (len([]rune(line)) + width - 1) / width
+	}
+	if rows > height {
+		t.Errorf("view rendered %d on-screen rows at width=%d, height=%d (overflow %d):\n%s",
+			rows, width, height, rows-height, view)
+	}
+	// The truncation surfaces as a "+N more" indicator inside the procs
+	// section — verify it's there so we know the cap is actually firing
+	// (rather than the test passing because procs all happened to fit).
+	if !strings.Contains(view, "more") {
+		t.Errorf("expected '+N more' indicator in truncated procs section; got:\n%s", view)
+	}
+}
+
+// TestRenderDetailPane_TinyHeightDoesNotOverflow guards the MaxHeight
+// backstop: at heights so small even the fixed top section overflows, the
+// pane must still cap at `height` rather than push the layout off-screen.
+// Procs-budgeting alone can't prevent this; the lipgloss MaxHeight call is
+// the safety net.
+func TestRenderDetailPane_TinyHeightDoesNotOverflow(t *testing.T) {
+	width, height := 160, 10
+
+	m := tui.NewModel(&fakeRefresher{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/repo/main",
+		State: aggregator.WorktreeState{
+			Worktree: git.Worktree{Path: "/repo/main", Branch: "main", Main: true},
+		},
+	}))
+
+	view := stripANSI(m.View())
+	rows := 0
+	for _, line := range strings.Split(view, "\n") {
+		if line == "" {
+			rows++
+			continue
+		}
+		rows += (len([]rune(line)) + width - 1) / width
+	}
+	if rows > height {
+		t.Errorf("view rendered %d on-screen rows at width=%d, height=%d (overflow %d):\n%s",
+			rows, width, height, rows-height, view)
 	}
 }
