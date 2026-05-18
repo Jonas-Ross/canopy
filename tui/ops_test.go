@@ -20,7 +20,7 @@ func newPopulatedModel(t *testing.T) tea.Model {
 	t.Helper()
 	rf := &fakeRefresher{}
 	m := tui.NewModel(rf)
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 220, Height: 40})
 	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
 		Worktree: "/r/wt-a",
 		State: aggregator.WorktreeState{
@@ -166,7 +166,7 @@ func TestUpdate_NewWorktreeKey_EntersForm(t *testing.T) {
 func TestView_MergedPRRowIsDimmed(t *testing.T) {
 	rf := &fakeRefresher{}
 	m := tui.NewModel(rf)
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 220, Height: 40})
 	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
 		Worktree: "/r/wt-merged",
 		State: aggregator.WorktreeState{
@@ -186,7 +186,7 @@ func TestView_MergedPRRowIsDimmed(t *testing.T) {
 func TestPRStaleIndicator(t *testing.T) {
 	rf := &fakeRefresher{}
 	m := tui.NewModel(rf)
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 220, Height: 40})
 	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
 		Worktree: "/r/wt-a",
 		State: aggregator.WorktreeState{

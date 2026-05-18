@@ -345,11 +345,23 @@ func (m Model) View() string {
 		pulseFor = m.pulsePath
 	}
 
-	list := renderWorktreeList(m.ordered, m.states, m.focusIndex, m.activeFilter(), now, width, pulseFor)
+	// Compute the list's effective width — it shrinks when the detail pane is
+	// visible so column-visibility gates fire against the actual list area.
+	listW := width
+	focused, hasFocus := m.focusedState()
+	showDetail := hasFocus && width >= detailPaneVisibleWidth
+	if showDetail {
+		if reduced := width - detailPaneWidth - 4; reduced >= 30 {
+			listW = reduced
+		} else {
+			showDetail = false
+		}
+	}
 
-	if focused, ok := m.focusedState(); ok && width >= detailPaneVisibleWidth {
-		detail := renderDetailPane(focused, now)
-		sb.WriteString(layoutWithDetail(list, detail, width))
+	list := renderWorktreeList(m.ordered, m.states, m.focusIndex, m.activeFilter(), now, listW, pulseFor)
+
+	if showDetail {
+		sb.WriteString(layoutWithDetail(list, renderDetailPane(focused, now), width))
 	} else {
 		sb.WriteString(list)
 	}

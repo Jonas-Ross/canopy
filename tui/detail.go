@@ -2,19 +2,47 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonasross/canopy/aggregator"
 	"github.com/jonasross/canopy/pr"
+	"github.com/jonasross/canopy/sessions"
 )
 
 const (
 	detailPaneVisibleWidth = 140
-	detailPaneWidth        = 44
+	// detailPaneWidth is the outer pane width including left border + padding
+	// (3 chars). Tuned so a 12-char label + 44-char value fits on one line.
+	detailPaneWidth = 60
+	// labelW is the fixed label-column width inside the pane.
+	labelW = 12
+	// detailBorderOverhead is BorderLeft(1) + PaddingLeft(2).
+	detailBorderOverhead = 3
 )
+
+// detailContentW is the usable width inside the border, for sizing wraps.
+const detailContentW = detailPaneWidth - detailBorderOverhead
+
+// valueW is the column width for the right-hand value after a label.
+const valueW = detailContentW - labelW
+
+// elidePath shortens a filesystem path to fit max chars by replacing $HOME
+// with "~" and tail-eliding with "…" if still too long.
+func elidePath(path string, max int) string {
+	if home := os.Getenv("HOME"); home != "" && strings.HasPrefix(path, home) {
+		path = "~" + path[len(home):]
+	}
+	if utf8.RuneCountInString(path) <= max {
+		return path
+	}
+	runes := []rune(path)
+	return "…" + string(runes[len(runes)-(max-1):])
+}
 
 func renderDetailPane(state aggregator.WorktreeState, now time.Time) string {
 	if state.Worktree.Path == "" {
@@ -25,22 +53,22 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time) string {
 	var sb strings.Builder
 	sb.Grow(512)
 	branch := FormatBranch(wt.Branch, wt.Detached)
-	sb.WriteString(detailHeaderStyle.Render(branch))
+	sb.WriteString(detailHeaderStyle.Render(truncate(branch, detailContentW)))
 	sb.WriteString("\n")
-	sb.WriteString(detailLabelStyle.Render(wt.Path))
+	sb.WriteString(detailLabelStyle.Render(elidePath(wt.Path, detailContentW)))
 	sb.WriteString("\n\n")
 
 	row := func(label, value string) {
 		if value == "" {
 			return
 		}
-		sb.WriteString(detailLabelStyle.Render(fmt.Sprintf("%-12s", label)))
+		sb.WriteString(detailLabelStyle.Render(fmt.Sprintf("%-*s", labelW, label)))
 		sb.WriteString(value)
 		sb.WriteString("\n")
 	}
 
 	if wt.LastCommit.Subject != "" {
-		row("commit", detailValueStyle.Render(truncate(wt.LastCommit.Subject, detailPaneWidth-14)))
+		row("commit", detailValueStyle.Render(truncate(wt.LastCommit.Subject, valueW)))
 	}
 	row("age", detailValueStyle.Render(FormatRelativeTime(wt.LastCommit.When, now)))
 	if wt.HasUpstream {
@@ -55,7 +83,7 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time) string {
 		sb.WriteString(detailHeaderStyle.Render("PR"))
 		sb.WriteString("\n")
 		row("number", detailValueStyle.Render(fmt.Sprintf("#%d", state.PR.Number)))
-		row("title", detailValueStyle.Render(truncate(state.PR.Title, detailPaneWidth-14)))
+		row("title", detailValueStyle.Render(truncate(state.PR.Title, valueW)))
 		row("state", prDetailState(*state.PR))
 		row("ci", prDetailCI(state.PR.CIRollup))
 		row("review", prDetailReview(state.PR.ReviewState))
@@ -70,7 +98,7 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time) string {
 		sb.WriteString(detailHeaderStyle.Render("Processes"))
 		sb.WriteString("\n")
 		for _, p := range state.Procs {
-			line := fmt.Sprintf("%-7d %s", p.Pid, truncate(p.Command, detailPaneWidth-10))
+			line := fmt.Sprintf("%-7d %s", p.Pid, truncate(p.Command, detailContentW-8))
 			if isClaudeProc(p.Command, p.Args) {
 				line = procsClaudeStyle.Render(line)
 			} else {
@@ -81,7 +109,7 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time) string {
 		}
 	}
 
-	if state.Live != nil || len(state.Recent) > 0 {
+	if state.Live != nil || hasRecentTopLevel(state.Recent) {
 		sb.WriteString("\n")
 		sb.WriteString(detailHeaderStyle.Render("Sessions"))
 		sb.WriteString("\n")
@@ -95,8 +123,13 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time) string {
 		}
 		shown := 0
 		for _, s := range state.Recent {
-			if shown >= 3 {
+			if shown >= 2 {
 				break
+			}
+			// Skip subagent sessions — they share the parent's model/cwd and
+			// duplicate visually.
+			if s.IsSidechain {
+				continue
 			}
 			if state.Live != nil && s.ID == state.Live.ID {
 				continue
@@ -111,6 +144,17 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time) string {
 	}
 
 	return detailBorderStyle.Render(sb.String())
+}
+
+// hasRecentTopLevel reports whether the Recent list contains at least one
+// non-sidechain session worth showing in the pane.
+func hasRecentTopLevel(recent []*sessions.Session) bool {
+	for _, s := range recent {
+		if !s.IsSidechain {
+			return true
+		}
+	}
+	return false
 }
 
 func dirtyCountString(n int) string {
