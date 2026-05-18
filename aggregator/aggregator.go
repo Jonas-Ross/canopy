@@ -89,10 +89,10 @@ func withDefaults(cfg Config) Config {
 // failure for a repo aborts the snapshot and is returned wrapped.
 func (a *Aggregator) Snapshot(ctx context.Context) ([]WorktreeState, error) {
 	prefixes := a.collectPrefixes(ctx)
-	pbp := a.procsSnapshot(ctx, prefixes)
+	procsByPrefix := a.procsSnapshot(ctx, prefixes)
 	var out []WorktreeState
 	err := a.walkAll(ctx, func(repo Repo, wt git.Worktree, siblings []string, prs []pr.PR, prStale bool) {
-		out = append(out, a.buildState(ctx, repo, wt, siblings, prs, prStale, pbp))
+		out = append(out, a.buildState(ctx, repo, wt, siblings, prs, prStale, procsByPrefix))
 	}, nil)
 	if err != nil {
 		return nil, err
@@ -136,7 +136,7 @@ func (a *Aggregator) walkAll(ctx context.Context, visit func(repo Repo, wt git.W
 // worktree just won't have its prefix in the bucket map, and
 // buildState will leave Procs empty for that one.
 func (a *Aggregator) collectPrefixes(ctx context.Context) []string {
-	out := make([]string, 0)
+	var out []string
 	for _, repo := range a.cfg.Repos {
 		wts, err := a.cfg.listWorktrees(ctx, repo.Root)
 		if err != nil {
