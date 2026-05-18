@@ -65,6 +65,13 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - Stay opinionated about small/understandable code over large libraries.
 - Aesthetics are a first-class feature, not polish at the end — but only once the milestone gate says it's time.
 
+## Issue scoping
+
+- When implementing a GitHub issue, **ship the full scope of the issue**. Do not silently carve off "later slices" or invent follow-up milestones (e.g. "M4.5") to make a PR feel smaller. If the work is genuinely too large for one PR, surface the split explicitly to Jonas before writing the spec — don't decide unilaterally.
+- "Pause for demo" or similar markers in an issue body are **mid-flight checkpoints** for Jonas to look at the work and steer, not PR cut-points. Continue to the issue's full acceptance criteria after the checkpoint unless he tells you otherwise.
+- Acceptance criteria like "would I open `canopy` tomorrow morning?" or "self-demo" are real bars, not flavor text. If shipped scope doesn't meet them, the issue is not done.
+- Don't prime the PM sub-agent with "user prefers small PRs" — that's a value judgment that biases scope. Let the issue dictate scope; let Jonas dictate splits.
+
 ## Starting a session
 
 1. Skim `docs/handoff.md` if anything is unclear about intent.

@@ -3,6 +3,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,11 +23,15 @@ type Refresher interface {
 // UpdateMsg wraps an aggregator.Update for delivery via tea.Program.Send.
 type UpdateMsg aggregator.Update
 
+// pulseDuration is how long a freshly-arrived live update is highlighted.
+const pulseDuration = 600 * time.Millisecond
+
 // Model is the root bubbletea model. Update is pure: I/O lives in Run.
 type Model struct {
 	refresher Refresher
 
-	repo string
+	repo     string
+	repoRoot string
 
 	width  int
 	height int
@@ -36,11 +41,20 @@ type Model struct {
 
 	focusIndex int
 
-	filtering   bool
+	mode mode
+
 	filterInput textinput.Model
 	filterStr   string
 
+	newBranchInput textinput.Model
+	newBaseInput   textinput.Model
+	newFormFocus   int
+
+	notice string
 	footer string
+
+	pulsePath  string
+	pulseUntil time.Time
 
 	now func() time.Time
 }
@@ -73,30 +87,100 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UpdateMsg:
 		u := aggregator.Update(msg)
-		if _, exists := m.states[u.Worktree]; !exists {
+		prev, existed := m.states[u.Worktree]
+		if !existed {
 			m.ordered = append(m.ordered, u.Worktree)
 		}
 		m.states[u.Worktree] = u.State
-		// Derive repo name from the first incoming update.
 		if m.repo == "" && u.State.Repo.Name != "" {
 			m.repo = u.State.Repo.Name
 		}
+		if m.repoRoot == "" && u.State.Repo.Root != "" {
+			m.repoRoot = u.State.Repo.Root
+		}
+		// Pulse if Live transitioned to non-nil OR Live.UpdatedAt advanced.
+		if u.State.Live != nil && (prev.Live == nil || u.State.Live.UpdatedAt.After(prev.Live.UpdatedAt)) {
+			m.pulsePath = u.Worktree
+			m.pulseUntil = m.now().Add(pulseDuration)
+		}
+		return m, nil
+
+	case prOpenedMsg:
+		if msg.err != nil {
+			m.notice = errorStyle.Render("open PR failed: " + msg.err.Error())
+		}
+		return m, clearNoticeCmd()
+
+	case shellDroppedMsg:
+		if msg.err != nil {
+			m.notice = errorStyle.Render("shell exited with error: " + msg.err.Error())
+		}
+		return m, clearNoticeCmd()
+
+	case worktreeRemovedMsg:
+		if msg.err != nil {
+			m.notice = errorStyle.Render("prune failed: " + msg.err.Error())
+		} else {
+			m.notice = noticeStyle.Render("pruned " + msg.path)
+			m.refresher.Refresh()
+		}
+		return m, clearNoticeCmd()
+
+	case worktreeCreatedMsg:
+		if msg.err != nil {
+			m.notice = errorStyle.Render("create failed: " + msg.err.Error())
+		} else {
+			m.notice = noticeStyle.Render("created " + msg.branch + " at " + msg.path)
+			m.refresher.Refresh()
+		}
+		return m, clearNoticeCmd()
+
+	case procsKilledMsg:
+		switch {
+		case msg.err != nil && msg.count == 0:
+			m.notice = errorStyle.Render("kill failed: " + msg.err.Error())
+		case msg.err != nil:
+			m.notice = noticeStyle.Render(fmt.Sprintf("sent SIGTERM to %d procs (some errored)", msg.count))
+		default:
+			m.notice = noticeStyle.Render(fmt.Sprintf("sent SIGTERM to %d procs", msg.count))
+		}
+		m.refresher.Refresh()
+		return m, clearNoticeCmd()
+
+	case noticeClearedMsg:
+		m.notice = ""
 		return m, nil
 
 	case tea.KeyMsg:
-		if m.filtering {
-			return m.updateFilterInput(msg)
-		}
-		return m.updateNormalMode(msg)
+		return m.handleKey(msg)
 	}
 
 	return m, nil
+}
+
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.mode {
+	case modeFiltering:
+		return m.updateFilterInput(msg)
+	case modeConfirmPrune:
+		return m.updateConfirmPrune(msg)
+	case modeConfirmKill:
+		return m.updateConfirmKill(msg)
+	case modeNewWorktree:
+		out, cmd := m.updateNewWorktreeForm(msg)
+		return out, cmd
+	}
+	return m.updateNormalMode(msg)
 }
 
 func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Type == tea.KeyCtrlC:
 		return m, tea.Quit
+
+	case msg.Type == tea.KeyEnter:
+		out, cmd := m.handleShellDrop()
+		return out, cmd
 
 	case msg.Type == tea.KeyRunes && len(msg.Runes) == 1:
 		switch msg.Runes[0] {
@@ -109,11 +193,23 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case keyRefresh:
 			m.refresher.Refresh()
 		case keyFilter:
-			m.filtering = true
+			m.mode = modeFiltering
 			m.filterInput.SetValue(m.filterStr)
 			m.filterInput.Focus()
 		case keyForensics:
 			m.footer = footerForensics
+		case keyNew:
+			out, cmd := m.startNewWorktree()
+			return out, cmd
+		case keyPrune:
+			out, cmd := m.startPrune()
+			return out, cmd
+		case keyOpenPR:
+			out, cmd := m.handleOpenPR()
+			return out, cmd
+		case keyKill:
+			out, cmd := m.startKill()
+			return out, cmd
 		}
 
 	case msg.Type == tea.KeyDown:
@@ -137,7 +233,7 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
 		m.filterStr = m.filterInput.Value()
-		m.filtering = false
+		m.mode = modeNormal
 		m.filterInput.Blur()
 		m.footer = footerHelp
 		return m, nil
@@ -145,7 +241,7 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		m.filterStr = ""
 		m.filterInput.SetValue("")
-		m.filtering = false
+		m.mode = modeNormal
 		m.filterInput.Blur()
 		m.footer = footerHelp
 		return m, nil
@@ -155,6 +251,58 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterInput, cmd = m.filterInput.Update(msg)
 		return m, cmd
 	}
+}
+
+func (m Model) updateConfirmPrune(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyEsc {
+		m.mode = modeNormal
+		return m, nil
+	}
+	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		r := msg.Runes[0]
+		if r == 'y' || r == 'Y' {
+			state, ok := m.focusedState()
+			m.mode = modeNormal
+			if !ok {
+				return m, nil
+			}
+			m.notice = noticeStyle.Render("pruning " + FormatBranch(state.Worktree.Branch, state.Worktree.Detached) + "…")
+			return m, removeWorktreeCmd(state.Worktree.Path)
+		}
+		if r == 'n' || r == 'N' {
+			m.mode = modeNormal
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateConfirmKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyEsc {
+		m.mode = modeNormal
+		return m, nil
+	}
+	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		r := msg.Runes[0]
+		if r == 'y' || r == 'Y' {
+			state, ok := m.focusedState()
+			m.mode = modeNormal
+			if !ok || len(state.Procs) == 0 {
+				return m, nil
+			}
+			pids := make([]int, 0, len(state.Procs))
+			for _, p := range state.Procs {
+				pids = append(pids, p.Pid)
+			}
+			m.notice = noticeStyle.Render(fmt.Sprintf("sending SIGTERM to %d procs…", len(pids)))
+			return m, killProcsCmd(pids)
+		}
+		if r == 'n' || r == 'N' {
+			m.mode = modeNormal
+			return m, nil
+		}
+	}
+	return m, nil
 }
 
 func (m Model) moveFocus(delta int) Model {
@@ -173,6 +321,13 @@ func (m Model) moveFocus(delta int) Model {
 	return m
 }
 
+func (m Model) activeFilter() string {
+	if m.mode == modeFiltering {
+		return m.filterInput.Value()
+	}
+	return m.filterStr
+}
+
 func (m Model) View() string {
 	now := m.now()
 	width := m.width
@@ -185,7 +340,19 @@ func (m Model) View() string {
 	sb.WriteString(m.renderTitleBar(width))
 	sb.WriteString("\n\n")
 
-	sb.WriteString(renderWorktreeList(m.ordered, m.states, m.focusIndex, m.activeFilter(), now))
+	pulseFor := ""
+	if !m.pulseUntil.IsZero() && now.Before(m.pulseUntil) {
+		pulseFor = m.pulsePath
+	}
+
+	list := renderWorktreeList(m.ordered, m.states, m.focusIndex, m.activeFilter(), now, width, pulseFor)
+
+	if focused, ok := m.focusedState(); ok && width >= detailPaneVisibleWidth {
+		detail := renderDetailPane(focused, now)
+		sb.WriteString(layoutWithDetail(list, detail, width))
+	} else {
+		sb.WriteString(list)
+	}
 	sb.WriteString("\n\n")
 
 	sb.WriteString(m.renderFooter(width))
@@ -193,15 +360,7 @@ func (m Model) View() string {
 	return sb.String()
 }
 
-func (m Model) activeFilter() string {
-	if m.filtering {
-		return m.filterInput.Value()
-	}
-	return m.filterStr
-}
-
 func (m Model) renderTitleBar(width int) string {
-	// "── Canopy · <repo> ─────────────── ops ──"
 	left := " " + titleStyle.Render("Canopy")
 	if m.repo != "" {
 		left += " " + ruleStyle.Render("·") + " " + repoStyle.Render(m.repo)
@@ -218,14 +377,29 @@ func (m Model) renderTitleBar(width int) string {
 }
 
 func (m Model) renderFooter(width int) string {
-	if m.filtering {
+	// Modal footers take priority.
+	switch m.mode {
+	case modeFiltering:
 		return "  " + m.filterInput.View()
+	case modeConfirmPrune:
+		state, _ := m.focusedState()
+		return "  " + promptStyle.Render(fmt.Sprintf("prune %s? [y/N]", FormatBranch(state.Worktree.Branch, state.Worktree.Detached)))
+	case modeConfirmKill:
+		state, _ := m.focusedState()
+		return "  " + promptStyle.Render(fmt.Sprintf("send SIGTERM to %d procs in %s? [y/N]", len(state.Procs), FormatBranch(state.Worktree.Branch, state.Worktree.Detached)))
+	case modeNewWorktree:
+		return "  " + promptStyle.Render("new worktree") + "    " + m.newBranchInput.View() + "    " + m.newBaseInput.View() + "    " + keyDescStyle.Render("[tab] switch  [enter] create  [esc] cancel")
+	}
+
+	// Transient notice (errors, action results) takes over the footer briefly.
+	if m.notice != "" {
+		return "  " + m.notice
 	}
 	// Transient footer set by f/tab.
 	if m.footer != footerHelp {
 		return "  " + dimStyle.Render(m.footer)
 	}
-	// Default styled help footer.
+
 	var chunks []string
 	for _, b := range footerKeys {
 		chunks = append(chunks, keyStyle.Render(b.key)+" "+keyDescStyle.Render(b.desc))
@@ -277,7 +451,7 @@ func FocusIndex(m tea.Model) int {
 
 func IsFiltering(m tea.Model) bool {
 	if mm, ok := m.(Model); ok {
-		return mm.filtering
+		return mm.mode == modeFiltering
 	}
 	return false
 }

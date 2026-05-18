@@ -7,6 +7,11 @@ const (
 	keyRefresh   = 'r'
 	keyFilter    = '/'
 	keyForensics = 'f'
+	keyNew       = 'n'
+	keyPrune     = 'd'
+	keyOpenPR    = 'p'
+	// keyKill is uppercase K because lowercase k is bound to up-nav.
+	keyKill = 'K'
 )
 
 const (
@@ -15,14 +20,17 @@ const (
 	filterPrompt    = "filter: "
 )
 
-// footerKeys is the default help footer — rendered with bold/dim styling in view.go.
+// footerKeys is the primary help footer rendered with bold/dim styling.
 var footerKeys = []struct{ key, desc string }{
 	{"j/k", "nav"},
+	{"⏎", "shell"},
+	{"n", "new"},
+	{"d", "prune"},
+	{"p", "PR"},
+	{"K", "kill"},
 	{"r", "refresh"},
 	{"/", "filter"},
 	{"q", "quit"},
 }
 
-// footerHelp is the plain-text fallback used when styled rendering is bypassed
-// (e.g. on key-triggered transient footer messages).
-const footerHelp = "j/k nav · r refresh · / filter · q quit"
+const footerHelp = "j/k nav · ⏎ shell · n new · d prune · p PR · K kill · r refresh · / filter · q quit"
