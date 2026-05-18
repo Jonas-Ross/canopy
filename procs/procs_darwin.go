@@ -25,15 +25,16 @@ const (
 // so a single transient pid (exited between listing and reading) does
 // not abort the walk.
 func systemEnumerate(ctx context.Context) ([]Process, error) {
-	pids, err := listAllPIDs()
+	procsList, err := listAllProcs()
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Process, 0, len(pids))
-	for _, pid := range pids {
+	out := make([]Process, 0, len(procsList))
+	for _, kp := range procsList {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		pid := kp.Proc.P_pid
 		if pid == 0 {
 			continue
 		}
@@ -52,28 +53,20 @@ func systemEnumerate(ctx context.Context) ([]Process, error) {
 	return out, nil
 }
 
-// listAllPIDs returns every visible pid via sysctl kern.proc.all.
+// listAllProcs returns every visible process entry via sysctl kern.proc.all.
 // This is the documented public API and works for unsigned binaries
 // on macOS 26+ (Tahoe), where the proc_info listpids path is
 // restricted without an entitlement.
-func listAllPIDs() ([]int32, error) {
-	procs, err := unix.SysctlKinfoProcSlice("kern.proc.all")
-	if err != nil {
-		return nil, err
-	}
-	pids := make([]int32, 0, len(procs))
-	for _, p := range procs {
-		pids = append(pids, p.Proc.P_pid)
-	}
-	return pids, nil
+func listAllProcs() ([]unix.KinfoProc, error) {
+	return unix.SysctlKinfoProcSlice("kern.proc.all")
 }
 
 // procVNodePathInfoSize is sizeof(struct proc_vnodepathinfo) from
 // xnu's bsd/sys/proc_info.h. Two proc_vnodeinfo_path entries (cdir,
 // rdir), each containing a proc_vnodeinfo (152 bytes) and a
 // proc_vnodepath (1024 bytes path + flags). Total = 2 * 1176 = 2352.
-// Verified against xnu-* headers; pinned here so a Go-side struct
-// definition drift can't surface as a silent buffer overrun.
+// The kernel requires the full struct size; a shorter buffer causes the
+// syscall to fail. Verified against xnu-* headers.
 const procVNodePathInfoSize = 2352
 
 // cdirPathOffset is the byte offset of cdir.vip_path inside the
@@ -102,7 +95,6 @@ func readCWD(pid int32) (string, bool) {
 	if errno != 0 {
 		return "", false
 	}
-	// n == procVNodePathInfoSize on success; we only need cdir (first half).
 	if int(n) < cdirPathOffset+maxPathLen {
 		return "", false
 	}
