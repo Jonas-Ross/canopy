@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -29,7 +30,7 @@ func openShellTab(dir string) error {
 	case "ghostty":
 		return spawnKeystrokeTab("Ghostty", dir)
 	case "WarpTerminal":
-		return spawnKeystrokeTab("Warp", dir)
+		return spawnWarpTab(dir)
 	case "vscode":
 		// VS Code / Cursor's integrated terminal can't open another tab in
 		// itself; punt to the OS's native terminal. darwin returns here;
@@ -77,6 +78,14 @@ end tell`
 
 func spawnWezTermTab(dir string) error {
 	return runCapturingStderr(exec.Command("wezterm", "cli", "spawn", "--cwd", dir))
+}
+
+// spawnWarpTab uses Warp's documented URI scheme so the new tab is launched
+// with its cwd set by Warp itself — no keystroke timing race against zsh
+// initialization. See github.com/warpdotdev/Warp issue #9083.
+func spawnWarpTab(dir string) error {
+	target := "warp://action/new_tab?path=" + url.QueryEscape(dir)
+	return runCapturingStderr(exec.Command("open", target))
 }
 
 // spawnKeystrokeTab opens a new tab in appName by sending Cmd-T then typing
