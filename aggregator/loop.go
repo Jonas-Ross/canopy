@@ -213,6 +213,14 @@ func (a *Aggregator) refreshOne(
 		}
 		return
 	}
+	// WorktreeStatus does not surface the identity flags ListWorktrees
+	// sets (Main, Bare); buildState faithfully copies them off the
+	// passed-in wt, so we have to restore them from prev or refreshOne
+	// silently flips Main to false and re-arms the prune prompt.
+	if prev, ok := state[path]; ok {
+		full.Main = prev.Worktree.Main
+		full.Bare = prev.Worktree.Bare
+	}
 	prList, prStale, prErr := a.fetchPRs(ctx, repo.Root)
 	a.observePRErr(repo.Root, prErr, subscribers, prErrs, true)
 	siblings := siblingPaths(pathToRepo, repo)
