@@ -27,7 +27,9 @@ func openShellTab(dir string) error {
 	case "WezTerm":
 		return spawnWezTermTab(dir)
 	case "ghostty":
-		return spawnGhosttyTab(dir)
+		return spawnKeystrokeTab("Ghostty", dir)
+	case "WarpTerminal":
+		return spawnKeystrokeTab("Warp", dir)
 	case "vscode":
 		// VS Code / Cursor's integrated terminal can't open another tab in
 		// itself; punt to the OS's native terminal. darwin returns here;
@@ -77,12 +79,13 @@ func spawnWezTermTab(dir string) error {
 	return runCapturingStderr(exec.Command("wezterm", "cli", "spawn", "--cwd", dir))
 }
 
-func spawnGhosttyTab(dir string) error {
-	// Ghostty has no stable AppleScript "new tab in cwd" verb, so we send
-	// Cmd-T then type the cd command via keystrokes. Needs Accessibility
-	// permission for "System Events".
+// spawnKeystrokeTab opens a new tab in appName by sending Cmd-T then typing
+// the cd command. Used for terminals (Ghostty, Warp) that have no stable
+// AppleScript verb for "new tab in cwd". Needs Accessibility permission
+// for "System Events" on first run.
+func spawnKeystrokeTab(appName, dir string) error {
 	shellCmd := "cd " + shellSingleQuote(dir)
-	script := `tell application "Ghostty" to activate
+	script := `tell application ` + appleScriptString(appName) + ` to activate
 delay 0.05
 tell application "System Events"
 	keystroke "t" using {command down}
