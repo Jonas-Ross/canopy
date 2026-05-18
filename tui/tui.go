@@ -476,3 +476,13 @@ func FilterValue(m tea.Model) string {
 	}
 	return ""
 }
+
+// SetNow replaces a Model's clock function. Test-only — used by the golden
+// frame harness to freeze time so pulse/notice rendering is deterministic.
+func SetNow(m tea.Model, fn func() time.Time) tea.Model {
+	if mm, ok := m.(Model); ok {
+		mm.now = fn
+		return mm
+	}
+	return m
+}

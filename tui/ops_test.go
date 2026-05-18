@@ -195,7 +195,7 @@ func TestPRStaleIndicator(t *testing.T) {
 			PRStale:  true,
 		},
 	}))
-	view := m.View()
+	view := stripANSI(m.View())
 	// Stale renders with a leading '~' before the number.
 	if !strings.Contains(view, "~#143") {
 		t.Errorf("View missing stale PR indicator '~#143'; view=%q", view)
