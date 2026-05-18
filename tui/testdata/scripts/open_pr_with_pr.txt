@@ -1,0 +1,11 @@
+# Regression check for the PRCache wiring bug: with PRCache wired, pressing
+# `p` on a worktree with an open PR should show "opening …", not "no PR".
+width 140
+height 40
+wait 200ms
+keys j
+key down
+keys p
+# Capture before any cmd-cascade so the "opening..." notice is visible.
+# After the cascade, openURLCmd's prOpenedMsg clears the notice.
+capture /tmp/canopy-demo-open-pr.txt

@@ -1,0 +1,6 @@
+# Boot canopy demo at full width and capture the initial frame.
+# Exercises: aggregator wiring, baseline emission, full column rendering.
+width 220
+height 40
+wait 200ms
+capture /tmp/canopy-demo-startup.txt

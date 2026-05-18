@@ -1,0 +1,12 @@
+# Drive the prune confirm modal end-to-end. With CANOPY_DEMO=1 the actual
+# `git worktree remove` is soft-gated so this is safe even outside the
+# sandbox tmpdir.
+width 140
+height 40
+wait 200ms
+keys j
+keys d
+capture /tmp/canopy-demo-prune-confirm.txt
+keys y
+wait 100ms
+capture /tmp/canopy-demo-prune-after.txt

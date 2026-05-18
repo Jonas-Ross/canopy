@@ -26,4 +26,4 @@ CI (`.github/workflows/ci.yml`) runs `go vet`, `go build`, and `go test -race` o
 
 ## Status
 
-v0. Root command is a stub. See the handoff doc for the v1 plan.
+M4 slices 1–3 landed: bubbletea operational view with worktree list, live-agent indicator (●), branch/dirty/ahead-behind/age columns, and incremental filter. Slices 4–8 (PR column, procs column, detail pane, ops keybinds, lipgloss polish) deferred to M4.5.

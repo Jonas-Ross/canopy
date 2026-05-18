@@ -1,0 +1,22 @@
+── Canopy · canopy-demo ───────────────────────────────────────────────────────────────────────────────────────────────────── ops · forensics ──
+
+   main                                    2h                                 │  feat/auth
+ ▍ feat/auth                 ↑1 ↓1         35m     ● claude-opus-4-7          │  /tmp/canopy-demo/repo/.worktrees/feat+auth
+   feat/dashboard            ~3 ↓1         3h                                 │
+   fix/login                 ↓1            1d                                 │  commit      auth: bcrypt migration
+   chore/deps                ↑2 ↓1         3d                                 │  age         35m
+                                                                              │  upstream    ↑1 ↓1
+                                                                              │  dirty       clean
+                                                                              │
+                                                                              │  PR
+                                                                              │  number      #42
+                                                                              │  title       auth: bcrypt migration
+                                                                              │  state       open
+                                                                              │  ci          ✓ passing
+                                                                              │  review      review required
+                                                                              │
+                                                                              │  Sessions
+                                                                              │  ● claude-opus-4-7  now
+                                                                              │
+
+  j/k nav  ·  ⏎ shell  ·  n new  ·  d prune  ·  p PR  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─────────────────────────────────────

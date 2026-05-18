@@ -89,9 +89,9 @@ func withDefaults(cfg Config) Config {
 // failure for a repo aborts the snapshot and is returned wrapped.
 func (a *Aggregator) Snapshot(ctx context.Context) ([]WorktreeState, error) {
 	var out []WorktreeState
-	err := a.walkAll(ctx, func(repo Repo, wt git.Worktree, prs []pr.PR, prStale bool) {
-		out = append(out, a.buildState(ctx, repo, wt, prs, prStale))
-	})
+	err := a.walkAll(ctx, func(repo Repo, wt git.Worktree, siblings []string, prs []pr.PR, prStale bool) {
+		out = append(out, a.buildState(ctx, repo, wt, siblings, prs, prStale))
+	}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -99,24 +99,41 @@ func (a *Aggregator) Snapshot(ctx context.Context) ([]WorktreeState, error) {
 }
 
 // walkAll iterates every (repo, worktree) pair across configured Repos,
-// calling visit for each with the current PR list and stale bool for
-// that repo. The visit callback runs synchronously on the caller
-// goroutine. A list-worktrees failure aborts and is returned wrapped.
-func (a *Aggregator) walkAll(ctx context.Context, visit func(repo Repo, wt git.Worktree, prs []pr.PR, prStale bool)) error {
+// calling visit for each with the current PR list, stale bool, and the
+// full set of sibling worktree paths for that repo (used by buildState
+// to attribute prefix-matched sessions/procs to the deepest worktree).
+// The visit callback runs synchronously on the caller goroutine. A
+// list-worktrees failure aborts and is returned wrapped.
+//
+// onPRErr (optional) is invoked once per repo with the PR-fetch error
+// (or nil) so the caller can track per-repo PR state across walks.
+func (a *Aggregator) walkAll(ctx context.Context, visit func(repo Repo, wt git.Worktree, siblings []string, prs []pr.PR, prStale bool), onPRErr func(repoRoot string, err error)) error {
 	for _, repo := range a.cfg.Repos {
 		wts, err := a.cfg.listWorktrees(ctx, repo.Root)
 		if err != nil {
 			return fmt.Errorf("aggregator: list worktrees for %s: %w", repo.Root, err)
 		}
-		prList, prStale := a.fetchPRs(ctx, repo.Root)
+		siblings := make([]string, 0, len(wts))
 		for _, wt := range wts {
-			visit(repo, wt, prList, prStale)
+			siblings = append(siblings, wt.Path)
+		}
+		prList, prStale, prErr := a.fetchPRs(ctx, repo.Root)
+		if onPRErr != nil {
+			onPRErr(repo.Root, prErr)
+		}
+		for _, wt := range wts {
+			visit(repo, wt, siblings, prList, prStale)
 		}
 	}
 	return nil
 }
 
-func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree, prList []pr.PR, prStale bool) WorktreeState {
+// buildState joins git/pr/procs/session data for one worktree. siblings is
+// the list of every worktree path in the same repo — used to attribute a
+// prefix-matched session or process to the deepest containing worktree
+// (e.g. a session under /repo/.worktrees/feat must NOT also appear under
+// /repo).
+func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree, siblings []string, prList []pr.PR, prStale bool) WorktreeState {
 	state := WorktreeState{
 		Repo:      repo,
 		Worktree:  wt,
@@ -131,7 +148,12 @@ func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree,
 	}
 
 	if ps, err := a.cfg.listProcs(ctx, state.Worktree.Path); err == nil && ps != nil {
-		state.Procs = ps
+		state.Procs = ps[:0]
+		for _, p := range ps {
+			if longestMatchingPath(p.Cwd, siblings) == state.Worktree.Path {
+				state.Procs = append(state.Procs, p)
+			}
+		}
 	}
 
 	if state.Worktree.Branch != "" {
@@ -145,7 +167,21 @@ func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree,
 		}
 	}
 
-	sess := a.cfg.SessionStore.SessionsByCwdPrefix(state.Worktree.Path)
+	rawSess := a.cfg.SessionStore.SessionsByCwdPrefix(state.Worktree.Path)
+	sess := rawSess[:0]
+	// A session is attributed to the deepest worktree containing its most
+	// recent cwd (Cwds is observation-ordered; last entry is current). This
+	// prevents a session that started in /repo and later moved into
+	// /repo/.worktrees/feat from showing on both worktrees.
+	for _, s := range rawSess {
+		if len(s.Cwds) == 0 {
+			continue
+		}
+		lastCwd := s.Cwds[len(s.Cwds)-1]
+		if longestMatchingPath(lastCwd, siblings) == state.Worktree.Path {
+			sess = append(sess, s)
+		}
+	}
 	if len(sess) > 0 {
 		recent := sess
 		if len(recent) > RecentSessionsLimit {
@@ -164,18 +200,19 @@ func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree,
 	return state
 }
 
-// fetchPRs returns the PR list for repoRoot plus the stale flag. A
-// nil PRCache or any error degrades to no-data; the stale-on-error
-// path inside pr.Cache is what actually carries old data forward.
-func (a *Aggregator) fetchPRs(ctx context.Context, repoRoot string) ([]pr.PR, bool) {
+// fetchPRs returns the PR list for repoRoot, the stale flag, and any
+// error surfaced by pr.Cache.Get (no cached fallback available). A
+// nil PRCache yields a nil error. Callers track the error to surface
+// user-actionable failures (ErrNoGH, ErrNotAuthed) to the TUI.
+func (a *Aggregator) fetchPRs(ctx context.Context, repoRoot string) ([]pr.PR, bool, error) {
 	if a.cfg.PRCache == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	prs, stale, err := a.cfg.PRCache.Get(ctx, repoRoot)
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
-	return prs, stale
+	return prs, stale, nil
 }
 
 // Start launches the state-owner goroutine, the fsnotify watcher,
@@ -254,10 +291,17 @@ func (a *Aggregator) Subscribe(ctx context.Context) <-chan Update {
 		return ch
 	}
 
+	// Reserve a wg slot up front. Done() runs either on the stop
+	// short-circuit paths below or via the unsubscribe goroutine's
+	// defer. This must happen before any chance of Close()'s Wait()
+	// observing a zero counter and returning early.
+	a.wg.Add(1)
+
 	done := make(chan struct{})
 	select {
 	case a.cmds <- command{kind: cmdSubscribe, sub: ch, done: done}:
 	case <-a.stop:
+		a.wg.Done()
 		close(ch)
 		return ch
 	}
@@ -267,11 +311,11 @@ func (a *Aggregator) Subscribe(ctx context.Context) <-chan Update {
 	select {
 	case <-done:
 	case <-a.stop:
+		a.wg.Done()
 		close(ch)
 		return ch
 	}
 
-	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
 		select {

@@ -44,9 +44,16 @@ type WorktreeState struct {
 }
 
 // Update is the diff event Subscribe emits.
+//
+// When SystemNotice is non-empty, the Update is a one-shot diagnostic
+// (e.g., "gh not authenticated — run gh auth login") rather than a
+// per-worktree state change. Worktree is "" and State is zero on
+// these. Subscribers should render the notice transiently and clear
+// it on the next user action.
 type Update struct {
-	Worktree string
-	State    WorktreeState
+	Worktree     string
+	State        WorktreeState
+	SystemNotice string
 }
 
 // Stats reports observable counters for the aggregator.

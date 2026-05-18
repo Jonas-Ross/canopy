@@ -6,8 +6,9 @@ A personal Go TUI (bubbletea + lipgloss) that fuses a worktree-aware git command
 
 - `docs/handoff.md` — vision, architecture, design decisions, non-goals. Source of truth. Read it before any non-trivial change; do not duplicate it here.
 - `~/.claude/plans/ok-claude-let-s-plan-agile-cocoa.md` — the approved v1 build-order plan (M0–M6). Defines milestone gates and exit criteria.
+- `docs/validation.md` — required reading before touching anything in `tui/` or `cmd/demo*`. Explains the golden-frame harness, the `canopy demo` sandbox subcommand, the script grammar, and the cascade-timing rules.
 
-If those two disagree, ask Jonas — don't pick.
+If those disagree, ask Jonas — don't pick.
 
 ## Commands
 
@@ -18,6 +19,9 @@ If those two disagree, ask Jonas — don't pick.
 | `go vet ./...` | Static checks |
 | `go mod tidy` | Sync deps after touching `go.mod` |
 | `./canopy` | Run the binary (currently prints a stub) |
+| `./canopy demo` | Launch the TUI against a throwaway sandbox repo |
+| `./canopy demo --script=tui/testdata/scripts/<file>` | Replay a script and capture frames — the agent-driveable loop |
+| `go test ./tui -update` | Re-bake golden frames after an intentional TUI change |
 
 CI: `.github/workflows/ci.yml` runs `go vet`, `go build`, and `go test -race -coverprofile=coverage.out` on Go 1.24 against every push to `main` and every PR.
 
@@ -65,6 +69,13 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - Stay opinionated about small/understandable code over large libraries.
 - Aesthetics are a first-class feature, not polish at the end — but only once the milestone gate says it's time.
 
+## Issue scoping
+
+- When implementing a GitHub issue, **ship the full scope of the issue**. Do not silently carve off "later slices" or invent follow-up milestones (e.g. "M4.5") to make a PR feel smaller. If the work is genuinely too large for one PR, surface the split explicitly to Jonas before writing the spec — don't decide unilaterally.
+- "Pause for demo" or similar markers in an issue body are **mid-flight checkpoints** for Jonas to look at the work and steer, not PR cut-points. Continue to the issue's full acceptance criteria after the checkpoint unless he tells you otherwise.
+- Acceptance criteria like "would I open `canopy` tomorrow morning?" or "self-demo" are real bars, not flavor text. If shipped scope doesn't meet them, the issue is not done.
+- Don't prime the PM sub-agent with "user prefers small PRs" — that's a value judgment that biases scope. Let the issue dictate scope; let Jonas dictate splits.
+
 ## Starting a session
 
 1. Skim `docs/handoff.md` if anything is unclear about intent.
@@ -74,6 +85,6 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 
 ## Status
 
-v0. Scaffolding only: cobra root command stub, single passing test, CI wired. Active milestone: **M0** (resolve the six open questions from the handoff before any package code lands). Update this section as milestones move.
+v0.4. Operational TUI lands in PR #15: `sessions`, `git`, `procs`, `pr`, `aggregator`, `tui`, and `cmd/demo` all in place. The validation loop (`go test ./tui` goldens + `canopy demo` scripted replays + optional `--capture-png` via `freeze`) is the merge gate for further TUI work — see `docs/validation.md`. Active milestone: **M4 → M5** transition.
 
-Build order: M0 → M1 (`sessions`) → M2 (`git`, `procs`, `pr`, parallelizable) → M3 (`aggregator`) → M4 (TUI operational view) → M5 (subcommand stubs) → M6 (verification). Critical path is M0 → M1 → M3 → M4.
+Build order: M0 → M1 (`sessions`) → M2 (`git`, `procs`, `pr`, parallelizable) → M3 (`aggregator`) → M4 (TUI operational view, **self-validating via the demo loop**) → M5 (subcommand stubs) → M6 (verification). Critical path is M0 → M1 → M3 → M4.
