@@ -3,4 +3,26 @@
  ▍   feat/auth                 ↑1 ↓1         #42 ○ ✓ R       35m     ● claude-opus-4-7
      feat/dashboard            ~3 ↓1         #43 ◐ ⋯         3h
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   j/k nav  ·  ⏎ shell  ·  n new  ·  d prune  ·  p PR  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─

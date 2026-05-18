@@ -402,6 +402,26 @@ func (m Model) activeFilter() string {
 	return m.filterStr
 }
 
+// wrappedRows returns the on-screen row count for s at the given column
+// width, accounting for terminal soft-wrap. lipgloss.Height counts only
+// explicit newlines, which undercounts the new-worktree footer and the
+// title/footer rule-fills (they overshoot width by 1–4 chars).
+func wrappedRows(s string, width int) int {
+	if width <= 0 {
+		return lipgloss.Height(s)
+	}
+	rows := 0
+	for _, line := range strings.Split(s, "\n") {
+		w := lipgloss.Width(line)
+		if w == 0 {
+			rows++
+			continue
+		}
+		rows += (w + width - 1) / width
+	}
+	return rows
+}
+
 func (m Model) View() string {
 	now := m.now()
 	width := m.width
@@ -409,10 +429,7 @@ func (m Model) View() string {
 		width = 80
 	}
 
-	var sb strings.Builder
-
-	sb.WriteString(m.renderTitleBar(width))
-	sb.WriteString("\n\n")
+	title := m.renderTitleBar(width)
 
 	pulseFor := ""
 	if !m.pulseUntil.IsZero() && now.Before(m.pulseUntil) {
@@ -434,15 +451,38 @@ func (m Model) View() string {
 
 	list := renderWorktreeList(m.ordered, m.states, m.focusIndex, m.activeFilter(), now, listW, pulseFor)
 
-	if showDetail {
-		sb.WriteString(layoutWithDetail(list, renderDetailPane(focused, now), width))
-	} else {
-		sb.WriteString(list)
+	footer := m.renderFooter(width)
+
+	// Pin the footer to the bottom so the layout has a stable height —
+	// otherwise body-height changes (focus moving onto a tall detail pane,
+	// items appearing under a filter) make the alt-screen redraw at a
+	// different row count and the footer visibly jumps. The body is either
+	// stretched (detail pane present → pane border runs full height) or
+	// padded below (list-only). Skip when m.height is unset.
+	bodyTargetH := 0
+	if m.height > 0 {
+		bodyTargetH = m.height - wrappedRows(title, width) - 1 - 1 - wrappedRows(footer, width)
 	}
+
+	body := list
+	if showDetail {
+		body = layoutWithDetail(list, renderDetailPane(focused, now, bodyTargetH), width)
+	}
+
+	var pad string
+	if bodyTargetH > 0 {
+		if extra := bodyTargetH - wrappedRows(body, width); extra > 0 {
+			pad = strings.Repeat("\n", extra)
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(title)
 	sb.WriteString("\n\n")
-
-	sb.WriteString(m.renderFooter(width))
-
+	sb.WriteString(body)
+	sb.WriteString(pad)
+	sb.WriteString("\n\n")
+	sb.WriteString(footer)
 	return sb.String()
 }
 

@@ -2,4 +2,27 @@
 
  ▍   (detached)                                              5m
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   j/k nav  ·  ⏎ shell  ·  n new  ·  d prune  ·  p PR  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─

@@ -99,3 +99,55 @@ func TestView_NegativeWidthClampedToMinimum(t *testing.T) {
 		t.Errorf("negative-width view returned empty string")
 	}
 }
+
+// TestView_NeverExceedsHeight pins the height-pad contract: the rendered
+// view must not exceed m.height on-screen rows, even when a footer
+// variant is wider than m.width and soft-wraps. The new-worktree footer
+// at width=80 is the known wrap case — without this guard the alt-screen
+// would scroll the footer off the bottom.
+func TestView_NeverExceedsHeight(t *testing.T) {
+	cases := []struct {
+		name          string
+		width, height int
+		setup         func(tea.Model) tea.Model
+	}{
+		{
+			name:   "new-worktree form at width 80 wraps footer",
+			width:  80, height: 24,
+			setup: func(m tea.Model) tea.Model {
+				m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+				return m
+			},
+		},
+		{
+			name:   "narrow help footer fits at width 60",
+			width:  60, height: 20,
+			setup:  func(m tea.Model) tea.Model { return m },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tui.NewModel(&fakeRefresher{})
+			m, _ = m.Update(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
+			m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+				Worktree: "/repo/wt-a",
+				State:    aggregator.WorktreeState{Worktree: newBaseWorktree("/repo/wt-a", "main")},
+			}))
+			m = tc.setup(m)
+
+			view := stripANSI(m.View())
+			rows := 0
+			for _, line := range strings.Split(view, "\n") {
+				if line == "" {
+					rows++
+					continue
+				}
+				rows += (len([]rune(line)) + tc.width - 1) / tc.width
+			}
+			if rows > tc.height {
+				t.Errorf("view rendered %d on-screen rows at width=%d, height=%d (overflow %d):\n%s",
+					rows, tc.width, tc.height, rows-tc.height, view)
+			}
+		})
+	}
+}
