@@ -53,6 +53,65 @@ func TestUpdate_WorktreeRemovedMsg_ErrorShowsErrorNotice(t *testing.T) {
 	}
 }
 
+// Regression: the aggregator's refreshAll path purges pruned worktrees from
+// its internal map but never broadcasts a deletion, and UpdateMsg only
+// upserts. A successful prune therefore has to remove the row from the
+// Model directly, otherwise the pruned worktree lingers (and stays
+// focusable / actionable) until a TUI restart.
+func TestUpdate_WorktreeRemovedMsg_SuccessRemovesRowFromModel(t *testing.T) {
+	rf := &fakeRefresher{}
+	m := tui.NewModel(rf)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/repo/main",
+		State:    aggregator.WorktreeState{Worktree: newBaseWorktree("/repo/main", "main")},
+	}))
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/repo/wt-a",
+		State:    aggregator.WorktreeState{Worktree: newBaseWorktree("/repo/wt-a", "feat/a")},
+	}))
+	// Focus the second row, then prune it.
+	m, _ = m.Update(sendKey('j'))
+	if got := tui.FocusIndex(m); got != 1 {
+		t.Fatalf("pre-condition: focus = %d, want 1", got)
+	}
+
+	var cmd tea.Cmd
+	m, cmd = m.Update(tui.MakeWorktreeRemovedMsg("/repo/wt-a", nil))
+	runIfCmd(cmd)
+
+	paths := tui.OrderedPaths(m)
+	if len(paths) != 1 || paths[0] != "/repo/main" {
+		t.Errorf("ordered = %v after prune, want [/repo/main] (pruned row must be dropped locally)", paths)
+	}
+	if got := tui.FocusIndex(m); got != 0 {
+		t.Errorf("focus = %d after pruning the focused row, want 0 (clamped to last remaining)", got)
+	}
+	view := stripANSI(m.View())
+	if strings.Contains(view, "feat/a") {
+		t.Errorf("View still shows pruned branch 'feat/a' — pruned row must vanish from list")
+	}
+}
+
+// Pruning a non-tracked path (e.g. duplicate message arriving after the
+// row is already gone) must be a safe no-op.
+func TestUpdate_WorktreeRemovedMsg_UnknownPathSafeNoop(t *testing.T) {
+	rf := &fakeRefresher{}
+	m := tui.NewModel(rf)
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/repo/main",
+		State:    aggregator.WorktreeState{Worktree: newBaseWorktree("/repo/main", "main")},
+	}))
+	var cmd tea.Cmd
+	m, cmd = m.Update(tui.MakeWorktreeRemovedMsg("/repo/not-tracked", nil))
+	runIfCmd(cmd)
+
+	paths := tui.OrderedPaths(m)
+	if len(paths) != 1 || paths[0] != "/repo/main" {
+		t.Errorf("ordered = %v after prune of unknown path, want [/repo/main] unchanged", paths)
+	}
+}
+
 func TestUpdate_WorktreeCreatedMsg_SuccessAndError(t *testing.T) {
 	rf := &fakeRefresher{}
 	m := tui.NewModel(rf)

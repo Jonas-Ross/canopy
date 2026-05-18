@@ -145,6 +145,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.notice = noticeStyle.Render("pruned " + msg.path)
+		// Optimistically drop the row locally: aggregator.refreshAll
+		// purges the state from its map but never broadcasts a deletion,
+		// and UpdateMsg only upserts. Without this the pruned worktree
+		// would linger in the list (still focusable, still actionable)
+		// until a TUI restart.
+		m = m.removeWorktree(msg.path)
 		return m, refreshCmd(m.refresher)
 
 	case worktreeCreatedMsg:
@@ -347,6 +353,28 @@ func (m Model) snapFocusToVisible() Model {
 			m.focusIndex = i
 			return m
 		}
+	}
+	return m
+}
+
+// removeWorktree drops path from m.states and m.ordered and clamps the
+// focus to a still-valid row. Safe to call on a path that isn't tracked.
+func (m Model) removeWorktree(path string) Model {
+	if _, ok := m.states[path]; !ok {
+		return m
+	}
+	delete(m.states, path)
+	for i, p := range m.ordered {
+		if p == path {
+			m.ordered = append(m.ordered[:i], m.ordered[i+1:]...)
+			break
+		}
+	}
+	if m.focusIndex >= len(m.ordered) {
+		m.focusIndex = len(m.ordered) - 1
+	}
+	if m.focusIndex < 0 {
+		m.focusIndex = 0
 	}
 	return m
 }

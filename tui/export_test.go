@@ -64,6 +64,17 @@ func NoticeOf(m tea.Model) string {
 	return ""
 }
 
+// OrderedPaths returns the worktree paths the Model is currently tracking,
+// in their order of arrival. Returns nil on a type-assertion miss.
+func OrderedPaths(m tea.Model) []string {
+	if mm, ok := m.(Model); ok {
+		out := make([]string, len(mm.ordered))
+		copy(out, mm.ordered)
+		return out
+	}
+	return nil
+}
+
 // Pure-helper exports for direct testing.
 
 func ElidePath(path string, max int) string { return elidePath(path, max) }
