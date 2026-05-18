@@ -13,9 +13,13 @@ import (
 const (
 	// callnum values for SYS_PROC_INFO.
 	procInfoCallListPIDs = 1
+	procInfoCallPIDInfo  = 2
 
 	// proc_listpids "type" argument.
 	procAllPIDs = 1
+
+	// proc_pidinfo "flavor" values.
+	procPIDVNodePathInfo = 9
 )
 
 // systemEnumerate walks the live process table via the proc_info
@@ -50,53 +54,68 @@ func systemEnumerate(ctx context.Context) ([]Process, error) {
 	return out, nil
 }
 
-// listAllPIDs returns every visible pid using proc_listpids with
-// PROC_ALL_PIDS. Performs a size-probe call first, then a sized read.
-// We double the probe result to absorb forks between calls.
+// listAllPIDs returns every visible pid using sysctl kern.proc.all.
+// proc_listpids (SYS_PROC_INFO callnum=1) is restricted on macOS 26+
+// (Tahoe) when the binary is unsigned; sysctl kern.proc.all works for
+// any process without special entitlements.
 func listAllPIDs() ([]int32, error) {
-	probe, _, errno := unix.Syscall6(
-		unix.SYS_PROC_INFO,
-		procInfoCallListPIDs,
-		procAllPIDs,
-		0,
-		0,
-		0, 0,
-	)
-	if errno != 0 {
-		return nil, errno
+	procs, err := unix.SysctlKinfoProcSlice("kern.proc.all")
+	if err != nil {
+		return nil, err
 	}
-	if probe == 0 {
-		return nil, nil
-	}
-
-	bufBytes := int(probe) * 2
-	buf := make([]byte, bufBytes)
-	n, _, errno := unix.Syscall6(
-		unix.SYS_PROC_INFO,
-		procInfoCallListPIDs,
-		procAllPIDs,
-		0,
-		uintptr(unsafe.Pointer(&buf[0])),
-		uintptr(bufBytes),
-		0,
-	)
-	if errno != 0 {
-		return nil, errno
-	}
-
-	const sz = int(unsafe.Sizeof(int32(0)))
-	count := int(n) / sz
-	pids := make([]int32, count)
-	for i := range pids {
-		pids[i] = *(*int32)(unsafe.Pointer(&buf[i*sz]))
+	pids := make([]int32, 0, len(procs))
+	for _, p := range procs {
+		pids = append(pids, p.Proc.P_pid)
 	}
 	return pids, nil
 }
 
-// readCWD is implemented in Task 4.
+// procVNodePathInfoSize is sizeof(struct proc_vnodepathinfo) from
+// xnu's bsd/sys/proc_info.h. Two proc_vnodeinfo_path entries (cdir,
+// rdir), each containing a proc_vnodeinfo (152 bytes) and a
+// proc_vnodepath (1024 bytes path + flags). Total = 2 * 1176 = 2352.
+// Verified against xnu-* headers; pinned here so a Go-side struct
+// definition drift can't surface as a silent buffer overrun.
+const procVNodePathInfoSize = 2352
+
+// cdirPathOffset is the byte offset of cdir.vip_path inside the
+// proc_vnodepathinfo struct. cdir is the first proc_vnodeinfo_path
+// entry; vip_path is preceded by the 152-byte vip_vi (proc_vnodeinfo).
+const cdirPathOffset = 152
+
+// maxPathLen mirrors MAXPATHLEN (PATH_MAX) on darwin.
+const maxPathLen = 1024
+
+// readCWD returns the cwd for a pid via proc_pidinfo. Returns false on
+// any syscall error (ESRCH if the pid exited, EPERM for processes
+// outside the caller's uid). Errors are silent — a transient pid must
+// not abort the walk.
 func readCWD(pid int32) (string, bool) {
-	_ = pid
-	return "", false
+	var buf [procVNodePathInfoSize]byte
+	n, _, errno := unix.Syscall6(
+		unix.SYS_PROC_INFO,
+		procInfoCallPIDInfo,
+		uintptr(pid),
+		procPIDVNodePathInfo,
+		0,
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(len(buf)),
+	)
+	if errno != 0 {
+		return "", false
+	}
+	if int(n) < cdirPathOffset+maxPathLen {
+		return "", false
+	}
+	path := buf[cdirPathOffset : cdirPathOffset+maxPathLen]
+	end := 0
+	for end < len(path) && path[end] != 0 {
+		end++
+	}
+	if end == 0 {
+		return "", false
+	}
+	return string(path[:end]), true
 }
 
 // readArgv is implemented in Task 5.
