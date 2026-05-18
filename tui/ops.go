@@ -137,18 +137,19 @@ func (m Model) handleShellDrop() (Model, tea.Cmd) {
 		return m, nil
 	}
 	if isDemoMode() {
-		m.notice = noticeStyle.Render("demo: would drop into shell at " + state.Worktree.Path)
+		m.notice = noticeStyle.Render("demo: would open shell tab at " + state.Worktree.Path)
 		return m, nil
 	}
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
+	return m, openShellTabCmd(state.Worktree.Path)
+}
+
+// openShellTabCmd spawns a new terminal tab at dir without suspending the
+// TUI. The resulting shellDroppedMsg carries the spawn error (or nil on
+// success); it does not represent the shell's eventual exit.
+func openShellTabCmd(dir string) tea.Cmd {
+	return func() tea.Msg {
+		return shellDroppedMsg{err: openShellTab(dir)}
 	}
-	c := exec.Command(shell)
-	c.Dir = state.Worktree.Path
-	return m, tea.ExecProcess(c, func(err error) tea.Msg {
-		return shellDroppedMsg{err: err}
-	})
 }
 
 func (m Model) startPrune() (Model, tea.Cmd) {

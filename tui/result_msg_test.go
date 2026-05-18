@@ -225,8 +225,8 @@ func TestUpdate_ShellDroppedMsg_ErrorShowsErrorNotice(t *testing.T) {
 	m, _ = m.Update(tui.MakeShellDroppedMsg(errors.New("exit status 1")))
 
 	notice := stripANSI(tui.NoticeOf(m))
-	if !strings.Contains(notice, "shell exited with error") || !strings.Contains(notice, "exit status 1") {
-		t.Errorf("error notice = %q, want 'shell exited with error: …'", notice)
+	if !strings.Contains(notice, "open shell tab failed") || !strings.Contains(notice, "exit status 1") {
+		t.Errorf("error notice = %q, want 'open shell tab failed: …'", notice)
 	}
 }
 
