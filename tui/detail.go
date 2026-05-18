@@ -44,7 +44,7 @@ func elidePath(path string, max int) string {
 	return "…" + string(runes[len(runes)-(max-1):])
 }
 
-func renderDetailPane(state aggregator.WorktreeState, now time.Time) string {
+func renderDetailPane(state aggregator.WorktreeState, now time.Time, height int) string {
 	if state.Worktree.Path == "" {
 		return ""
 	}
@@ -143,7 +143,11 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time) string {
 		}
 	}
 
-	return detailBorderStyle.Render(sb.String())
+	style := detailBorderStyle
+	if height > 0 {
+		style = style.Height(height)
+	}
+	return style.Render(sb.String())
 }
 
 // hasRecentTopLevel reports whether the Recent list contains at least one
@@ -204,7 +208,9 @@ func prDetailReview(state string) string {
 }
 
 // layoutWithDetail joins the worktree list and the detail pane horizontally.
-// If the terminal is too narrow, returns the list alone.
+// If the terminal is too narrow, returns the list alone. The detail string
+// already carries its own border + (optional) height; the list column is
+// padded by JoinHorizontal to match.
 func layoutWithDetail(list, detail string, width int) string {
 	if width < detailPaneVisibleWidth || detail == "" {
 		return list

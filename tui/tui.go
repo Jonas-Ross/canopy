@@ -431,24 +431,31 @@ func (m Model) View() string {
 
 	list := renderWorktreeList(m.ordered, m.states, m.focusIndex, m.activeFilter(), now, listW, pulseFor)
 
-	body := list
-	if showDetail {
-		body = layoutWithDetail(list, renderDetailPane(focused, now), width)
-	}
-
 	footer := m.renderFooter(width)
 
 	// Pin the footer to the bottom of the terminal so the layout has a
 	// stable height — without this, body height changes (focus moving onto
 	// a worktree with a tall detail pane, items appearing/disappearing)
 	// cause the alt-screen to redraw with a different line count and the
-	// footer visibly jumps. Structure: title + blank + body + pad + blank
-	// + footer == m.height. Skip when m.height is unset or too small.
-	var pad string
+	// footer visibly jumps. Structure: title + blank + body + blank +
+	// footer == m.height. When detail is showing, the body's two columns
+	// are stretched to bodyTargetH so the pane's left border runs the full
+	// height; otherwise we pad below the list with blank lines. Skip when
+	// m.height is unset.
+	bodyTargetH := 0
 	if m.height > 0 {
-		used := lipgloss.Height(title) + 1 + lipgloss.Height(body) + 1 + lipgloss.Height(footer)
-		if m.height > used {
-			pad = strings.Repeat("\n", m.height-used)
+		bodyTargetH = m.height - lipgloss.Height(title) - 1 - 1 - lipgloss.Height(footer)
+	}
+
+	body := list
+	if showDetail {
+		body = layoutWithDetail(list, renderDetailPane(focused, now, bodyTargetH), width)
+	}
+
+	var pad string
+	if bodyTargetH > 0 {
+		if extra := bodyTargetH - lipgloss.Height(body); extra > 0 {
+			pad = strings.Repeat("\n", extra)
 		}
 	}
 

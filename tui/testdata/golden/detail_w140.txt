@@ -18,13 +18,13 @@
                                                                               │  Sessions
                                                                               │  ● claude-opus-4-7  now
                                                                               │
-
-
-
-
-
-
-
-
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
 
   j/k nav  ·  ⏎ shell  ·  n new  ·  d prune  ·  p PR  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─────────────────────────────────────
