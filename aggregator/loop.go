@@ -217,7 +217,8 @@ func (a *Aggregator) refreshOne(
 	// sets (Main, Bare); buildState faithfully copies them off the
 	// passed-in wt, so we have to restore them from prev or refreshOne
 	// silently flips Main to false and re-arms the prune prompt.
-	if prev, ok := state[path]; ok {
+	prev, had := state[path]
+	if had {
 		full.Main = prev.Worktree.Main
 		full.Bare = prev.Worktree.Bare
 	}
@@ -225,7 +226,6 @@ func (a *Aggregator) refreshOne(
 	a.observePRErr(repo.Root, prErr, subscribers, prErrs, true)
 	siblings := siblingPaths(pathToRepo, repo)
 	next := a.buildState(ctx, repo, full, siblings, prList, prStale)
-	prev, had := state[path]
 	state[path] = next
 	if !had || !worktreeStatesEqual(prev, next) {
 		a.broadcast(subscribers, Update{Worktree: path, State: next})
