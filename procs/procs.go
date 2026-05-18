@@ -107,8 +107,8 @@ func ListByCwdPrefixes(ctx context.Context, prefixes []string) (map[string][]Pro
 			}
 		}
 	}
-	for p := range out {
-		sort.Slice(out[p], func(i, j int) bool { return out[p][i].Pid < out[p][j].Pid })
+	for _, bucket := range out {
+		sort.Slice(bucket, func(i, j int) bool { return bucket[i].Pid < bucket[j].Pid })
 	}
 	return out, nil
 }

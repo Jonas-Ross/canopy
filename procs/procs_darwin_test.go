@@ -69,7 +69,7 @@ func TestCommandFromArgs(t *testing.T) {
 		{"absolute path", []string{"/bin/zsh"}, "zsh"},
 		{"deep path", []string{"/usr/local/bin/claude", "--print"}, "claude"},
 		{"empty first arg", []string{""}, ""},
-		{"trailing slash", []string{"/foo/"}, ""},
+		{"trailing slash", []string{"/foo/"}, "foo"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

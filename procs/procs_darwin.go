@@ -3,7 +3,9 @@
 package procs
 
 import (
+	"bytes"
 	"context"
+	"path/filepath"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -105,14 +107,25 @@ func readCWD(pid int32) (string, bool) {
 		return "", false
 	}
 	path := buf[cdirPathOffset : cdirPathOffset+maxPathLen]
-	end := 0
-	for end < len(path) && path[end] != 0 {
-		end++
-	}
-	if end == 0 {
+	end := bytes.IndexByte(path, 0)
+	switch end {
+	case -1:
+		return string(path), true
+	case 0:
 		return "", false
+	default:
+		return string(path[:end]), true
 	}
-	return string(path[:end]), true
+}
+
+// nextCString returns the next null-terminated string from b along with
+// the remaining slice after the null. ok is false if no null was found.
+func nextCString(b []byte) (s string, rest []byte, ok bool) {
+	end := bytes.IndexByte(b, 0)
+	if end < 0 {
+		return "", nil, false
+	}
+	return string(b[:end]), b[end+1:], true
 }
 
 // readArgv returns the argv vector of a pid via sysctl KERN_PROCARGS2.
@@ -137,35 +150,26 @@ func readArgv(pid int32) []string {
 		return nil
 	}
 
-	// Skip the int32 argc header.
 	p := buf[4:]
 
-	// Skip exec_path: the first null-terminated string.
-	i := 0
-	for i < len(p) && p[i] != 0 {
-		i++
-	}
-	if i >= len(p) {
+	_, rest, ok := nextCString(p)
+	if !ok {
 		return nil
 	}
-	// Skip the null terminator AND any zero padding that follows.
-	for i < len(p) && p[i] == 0 {
-		i++
+	for len(rest) > 0 && rest[0] == 0 {
+		rest = rest[1:]
 	}
-	p = p[i:]
+	p = rest
 
-	// Read argc null-terminated strings.
 	args := make([]string, 0, argc)
 	for len(args) < int(argc) && len(p) > 0 {
-		end := 0
-		for end < len(p) && p[end] != 0 {
-			end++
-		}
-		args = append(args, string(p[:end]))
-		if end >= len(p) {
+		s, rest, ok := nextCString(p)
+		if !ok {
+			args = append(args, string(p))
 			break
 		}
-		p = p[end+1:]
+		args = append(args, s)
+		p = rest
 	}
 	if len(args) == 0 {
 		return nil
@@ -173,18 +177,13 @@ func readArgv(pid int32) []string {
 	return args
 }
 
-// commandFromArgs returns Args[0] basename, or "" if Args is empty.
+// commandFromArgs returns Args[0] basename, or "" if Args is empty or
+// args[0] is empty.
 func commandFromArgs(args []string) string {
-	if len(args) == 0 {
+	if len(args) == 0 || args[0] == "" {
 		return ""
 	}
-	a := args[0]
-	for i := len(a) - 1; i >= 0; i-- {
-		if a[i] == '/' {
-			return a[i+1:]
-		}
-	}
-	return a
+	return filepath.Base(args[0])
 }
 
 // enumerate is the seam picked up by ListByCwdPrefixes via the
