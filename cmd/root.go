@@ -7,11 +7,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jonasross/canopy/aggregator"
 	"github.com/jonasross/canopy/git"
+	"github.com/jonasross/canopy/pr"
 	"github.com/jonasross/canopy/sessions"
 	"github.com/jonasross/canopy/tui"
 )
@@ -57,6 +59,7 @@ processes at once.`,
 		agg, err := aggregator.New(aggregator.Config{
 			Repos:        []aggregator.Repo{{Root: repoRoot, Name: filepath.Base(repoRoot)}},
 			SessionStore: store,
+			PRCache:      pr.NewCache(30 * time.Second),
 		})
 		if err != nil {
 			return fmt.Errorf("canopy: create aggregator: %w", err)
