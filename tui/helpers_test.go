@@ -1,12 +1,15 @@
 package tui_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jonasross/canopy/aggregator"
+	"github.com/jonasross/canopy/git"
+	"github.com/jonasross/canopy/procs"
 	"github.com/jonasross/canopy/tui"
 )
 
@@ -100,6 +103,20 @@ func TestView_NegativeWidthClampedToMinimum(t *testing.T) {
 	}
 }
 
+// countViewRows returns the on-screen row count of view at the given width,
+// accounting for soft-wrap of lines wider than width.
+func countViewRows(view string, width int) int {
+	rows := 0
+	for _, line := range strings.Split(view, "\n") {
+		if line == "" {
+			rows++
+			continue
+		}
+		rows += (len([]rune(line)) + width - 1) / width
+	}
+	return rows
+}
+
 // TestView_NeverExceedsHeight pins the height-pad contract: the rendered
 // view must not exceed m.height on-screen rows, even when a footer
 // variant is wider than m.width and soft-wraps. The new-worktree footer
@@ -136,18 +153,64 @@ func TestView_NeverExceedsHeight(t *testing.T) {
 			m = tc.setup(m)
 
 			view := stripANSI(m.View())
-			rows := 0
-			for _, line := range strings.Split(view, "\n") {
-				if line == "" {
-					rows++
-					continue
-				}
-				rows += (len([]rune(line)) + tc.width - 1) / tc.width
-			}
-			if rows > tc.height {
+			if rows := countViewRows(view, tc.width); rows > tc.height {
 				t.Errorf("view rendered %d on-screen rows at width=%d, height=%d (overflow %d):\n%s",
 					rows, tc.width, tc.height, rows-tc.height, view)
 			}
 		})
+	}
+}
+
+func TestView_NeverExceedsHeight_DetailPaneOverflow(t *testing.T) {
+	width, height := 160, 20
+	const procCount = 35
+
+	procList := make([]procs.Process, procCount)
+	for i := range procList {
+		procList[i] = procs.Process{
+			Pid:     10000 + i,
+			Cwd:     "/repo/main",
+			Command: fmt.Sprintf("worker-%d", i),
+		}
+	}
+
+	m := tui.NewModel(&fakeRefresher{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/repo/main",
+		State: aggregator.WorktreeState{
+			Worktree: git.Worktree{Path: "/repo/main", Branch: "main", Main: true},
+			Procs:    procList,
+		},
+	}))
+
+	view := stripANSI(m.View())
+	if rows := countViewRows(view, width); rows > height {
+		t.Errorf("view rendered %d on-screen rows at width=%d, height=%d (overflow %d):\n%s",
+			rows, width, height, rows-height, view)
+	}
+	// Defensive: assert the truncation actually fired, so the test can't
+	// silently pass if a future change makes all procs fit by coincidence.
+	if !strings.Contains(view, "more") {
+		t.Errorf("expected '+N more' indicator in truncated procs section; got:\n%s", view)
+	}
+}
+
+func TestRenderDetailPane_TinyHeightDoesNotOverflow(t *testing.T) {
+	width, height := 160, 10
+
+	m := tui.NewModel(&fakeRefresher{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/repo/main",
+		State: aggregator.WorktreeState{
+			Worktree: git.Worktree{Path: "/repo/main", Branch: "main", Main: true},
+		},
+	}))
+
+	view := stripANSI(m.View())
+	if rows := countViewRows(view, width); rows > height {
+		t.Errorf("view rendered %d on-screen rows at width=%d, height=%d (overflow %d):\n%s",
+			rows, width, height, rows-height, view)
 	}
 }
