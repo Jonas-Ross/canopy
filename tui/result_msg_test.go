@@ -5,10 +5,20 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/jonasross/canopy/aggregator"
 	"github.com/jonasross/canopy/pr"
 	"github.com/jonasross/canopy/tui"
 )
+
+// runIfCmd drains a returned tea.Cmd so the test can observe side effects
+// (e.g., m.refresher.Refresh being called via refreshCmd).
+func runIfCmd(cmd tea.Cmd) {
+	if cmd != nil {
+		cmd()
+	}
+}
 
 // Tests for the operation-result message handlers in tui/tui.go: every
 // *Msg switch arm has at least one positive and one negative assertion.
@@ -16,7 +26,9 @@ import (
 func TestUpdate_WorktreeRemovedMsg_SuccessNoticesAndRefreshes(t *testing.T) {
 	rf := &fakeRefresher{}
 	m := tui.NewModel(rf)
-	m, _ = m.Update(tui.MakeWorktreeRemovedMsg("/repo/wt-a", nil))
+	var cmd tea.Cmd
+	m, cmd = m.Update(tui.MakeWorktreeRemovedMsg("/repo/wt-a", nil))
+	runIfCmd(cmd)
 
 	notice := stripANSI(tui.NoticeOf(m))
 	if !strings.Contains(notice, "pruned") || !strings.Contains(notice, "/repo/wt-a") {
@@ -45,7 +57,9 @@ func TestUpdate_WorktreeCreatedMsg_SuccessAndError(t *testing.T) {
 	rf := &fakeRefresher{}
 	m := tui.NewModel(rf)
 
-	m, _ = m.Update(tui.MakeWorktreeCreatedMsg("feat/x", "/repo/.worktrees/feat+x", nil))
+	var cmd tea.Cmd
+	m, cmd = m.Update(tui.MakeWorktreeCreatedMsg("feat/x", "/repo/.worktrees/feat+x", nil))
+	runIfCmd(cmd)
 	if notice := stripANSI(tui.NoticeOf(m)); !strings.Contains(notice, "created feat/x") {
 		t.Errorf("success notice = %q, want 'created feat/x …'", notice)
 	}
@@ -53,7 +67,8 @@ func TestUpdate_WorktreeCreatedMsg_SuccessAndError(t *testing.T) {
 		t.Errorf("Refresh calls after success = %d, want 1", rf.calls)
 	}
 
-	m, _ = m.Update(tui.MakeWorktreeCreatedMsg("feat/y", "", errors.New("already exists")))
+	m, cmd = m.Update(tui.MakeWorktreeCreatedMsg("feat/y", "", errors.New("already exists")))
+	runIfCmd(cmd)
 	if notice := stripANSI(tui.NoticeOf(m)); !strings.Contains(notice, "create failed") || !strings.Contains(notice, "already exists") {
 		t.Errorf("error notice = %q, want 'create failed: already exists'", notice)
 	}
@@ -65,7 +80,9 @@ func TestUpdate_WorktreeCreatedMsg_SuccessAndError(t *testing.T) {
 func TestUpdate_ProcsKilledMsg_FullSuccess(t *testing.T) {
 	rf := &fakeRefresher{}
 	m := tui.NewModel(rf)
-	m, _ = m.Update(tui.MakeProcsKilledMsg(3, nil))
+	var cmd tea.Cmd
+	m, cmd = m.Update(tui.MakeProcsKilledMsg(3, nil))
+	runIfCmd(cmd)
 
 	notice := stripANSI(tui.NoticeOf(m))
 	if !strings.Contains(notice, "sent SIGTERM to 3 procs") {
@@ -80,7 +97,9 @@ func TestUpdate_ProcsKilledMsg_PartialError(t *testing.T) {
 	rf := &fakeRefresher{}
 	m := tui.NewModel(rf)
 	// count > 0 with non-nil err means some succeeded, some failed.
-	m, _ = m.Update(tui.MakeProcsKilledMsg(2, errors.New("permission denied")))
+	var cmd tea.Cmd
+	m, cmd = m.Update(tui.MakeProcsKilledMsg(2, errors.New("permission denied")))
+	runIfCmd(cmd)
 
 	notice := stripANSI(tui.NoticeOf(m))
 	if !strings.Contains(notice, "sent SIGTERM to 2 procs") || !strings.Contains(notice, "some errored") {

@@ -117,6 +117,47 @@ func TestGolden_PulseExpired(t *testing.T) {
 	assertGolden(t, "pulse_expired", frame(m))
 }
 
+// TestPulse_RawFramesDifferAcrossActiveExpired pins the invariant the two
+// pulse goldens above only check loosely: after ANSI strip the layouts must
+// match (same column widths, glyphs, branch names), but in raw form the
+// active and expired frames must differ — otherwise the pulse color isn't
+// actually being applied, even though the regression-block check passes.
+// Catches a regression where livePulseStyle drifts back toward liveStyle.
+func TestPulse_RawFramesDifferAcrossActiveExpired(t *testing.T) {
+	fixtures := scenarioFixtures()
+	authIdx := 1
+	withoutLive := fixtures[authIdx]
+	withoutLive.Live = nil
+
+	build := func(advance time.Duration) string {
+		clk := goldenClock
+		m := tui.NewModel(&fakeRefresher{})
+		m = tui.SetNow(m, func() time.Time { return clk })
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+		m, _ = m.Update(tui.UpdateMsg(aggregator.Update{Worktree: withoutLive.Path, State: toState(withoutLive)}))
+		m, _ = m.Update(tui.UpdateMsg(aggregator.Update{Worktree: fixtures[authIdx].Path, State: toState(fixtures[authIdx])}))
+		clk = goldenClock.Add(advance)
+		return rawFrame(m)
+	}
+
+	active := build(0)
+	expired := build(2 * time.Second)
+
+	if active == expired {
+		t.Fatalf("raw frames are byte-identical across active/expired pulse — color is not being applied. Active and expired must differ in raw form even though stripped layouts match.")
+	}
+
+	// Belt-and-braces: the active frame must use a yellow SGR (33 or 93)
+	// somewhere; the expired one falls back to liveStyle (green). dirtyStyle
+	// also uses yellow, but the fixture here has DirtyFiles=0, so any yellow
+	// SGR in the active frame can only come from the pulse style.
+	hasYellow := strings.Contains(active, "\x1b[33m") || strings.Contains(active, "\x1b[93m") ||
+		strings.Contains(active, ";33m") || strings.Contains(active, ";93m")
+	if !hasYellow {
+		t.Errorf("active pulse frame contains no yellow SGR (33/93) — livePulseStyle may have drifted; raw=%q", active)
+	}
+}
+
 func TestGolden_DetachedHead(t *testing.T) {
 	fixtures := []fixtureWorktree{
 		{

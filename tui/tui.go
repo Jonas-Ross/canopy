@@ -75,6 +75,16 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
+// refreshCmd wraps a Refresher.Refresh() call in a tea.Cmd so the
+// bubbletea event loop never blocks on the refresh contract. Production's
+// aggregator is non-blocking today, but the interface doesn't promise it.
+func refreshCmd(r Refresher) tea.Cmd {
+	return func() tea.Msg {
+		r.Refresh()
+		return nil
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -85,6 +95,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UpdateMsg:
 		u := aggregator.Update(msg)
+		// System notices (gh missing/unauthed) arrive with Worktree="" —
+		// surface as a transient notice and skip the state-map path.
+		if u.SystemNotice != "" {
+			m.notice = errorStyle.Render(u.SystemNotice)
+			return m, nil
+		}
 		prev, existed := m.states[u.Worktree]
 		if !existed {
 			m.ordered = append(m.ordered, u.Worktree)
@@ -126,20 +142,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case worktreeRemovedMsg:
 		if msg.err != nil {
 			m.notice = errorStyle.Render("prune failed: " + msg.err.Error())
-		} else {
-			m.notice = noticeStyle.Render("pruned " + msg.path)
-			m.refresher.Refresh()
+			return m, nil
 		}
-		return m, nil
+		m.notice = noticeStyle.Render("pruned " + msg.path)
+		return m, refreshCmd(m.refresher)
 
 	case worktreeCreatedMsg:
 		if msg.err != nil {
 			m.notice = errorStyle.Render("create failed: " + msg.err.Error())
-		} else {
-			m.notice = noticeStyle.Render("created " + msg.branch + " at " + msg.path)
-			m.refresher.Refresh()
+			return m, nil
 		}
-		return m, nil
+		m.notice = noticeStyle.Render("created " + msg.branch + " at " + msg.path)
+		return m, refreshCmd(m.refresher)
 
 	case procsKilledMsg:
 		switch {
@@ -147,11 +161,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = errorStyle.Render("kill failed: " + msg.err.Error())
 		case msg.err != nil:
 			m.notice = noticeStyle.Render(fmt.Sprintf("sent SIGTERM to %d procs (some errored)", msg.count))
+		case msg.skipped > 0 && msg.count == 0:
+			m.notice = errorStyle.Render(fmt.Sprintf("kill skipped: %d procs no longer in worktree (PID reuse?)", msg.skipped))
+		case msg.skipped > 0:
+			m.notice = noticeStyle.Render(fmt.Sprintf("sent SIGTERM to %d procs (%d skipped — cwd changed)", msg.count, msg.skipped))
 		default:
 			m.notice = noticeStyle.Render(fmt.Sprintf("sent SIGTERM to %d procs", msg.count))
 		}
-		m.refresher.Refresh()
-		return m, nil
+		return m, refreshCmd(m.refresher)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -240,6 +257,7 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterStr = m.filterInput.Value()
 		m.mode = modeNormal
 		m.filterInput.Blur()
+		m = m.snapFocusToVisible()
 		return m, nil
 
 	case tea.KeyEsc:
@@ -299,9 +317,38 @@ func (m Model) updateConfirmKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			pids = append(pids, p.Pid)
 		}
 		m.notice = noticeStyle.Render(fmt.Sprintf("sending SIGTERM to %d procs…", len(pids)))
-		return m, killProcsCmd(pids)
+		return m, killProcsCmd(pids, state.Worktree.Path)
 	})
 	return next, cmd
+}
+
+// snapFocusToVisible moves focusIndex to the first worktree that passes
+// the current filter, when the existing focus is hidden. No-op when the
+// filter is empty or focus is already on a visible row.
+func (m Model) snapFocusToVisible() Model {
+	filter := m.activeFilter()
+	if filter == "" {
+		return m
+	}
+	lowerFilter := strings.ToLower(filter)
+	visible := func(path string) bool {
+		state, ok := m.states[path]
+		if !ok {
+			return false
+		}
+		branch := FormatBranch(state.Worktree.Branch, state.Worktree.Detached)
+		return strings.Contains(strings.ToLower(branch), lowerFilter)
+	}
+	if m.focusIndex >= 0 && m.focusIndex < len(m.ordered) && visible(m.ordered[m.focusIndex]) {
+		return m
+	}
+	for i, path := range m.ordered {
+		if visible(path) {
+			m.focusIndex = i
+			return m
+		}
+	}
+	return m
 }
 
 func (m Model) moveFocus(delta int) Model {

@@ -35,7 +35,7 @@ func MakeShellDroppedMsg(err error) tea.Msg {
 // and observe the returned message without going through the Update loop.
 
 func RemoveWorktreeCmdForTest(path string) tea.Cmd { return removeWorktreeCmd(path) }
-func KillProcsCmdForTest(pids []int) tea.Cmd       { return killProcsCmd(pids) }
+func KillProcsCmdForTest(pids []int) tea.Cmd       { return killProcsCmd(pids, "") }
 func OpenURLCmdForTest(url string) tea.Cmd         { return openURLCmd(url) }
 
 // Mode introspection — for asserting a Model is in the right modal state.
@@ -68,3 +68,13 @@ func NoticeOf(m tea.Model) string {
 
 func ElidePath(path string, max int) string { return elidePath(path, max) }
 func Truncate(s string, max int) string     { return truncate(s, max) }
+
+// CreateWorktreeCmdForTest exposes createWorktreeCmd so tests can drive
+// the branch-name validation and soft-gate paths.
+func CreateWorktreeCmdForTest(repoRoot, branch, base string) tea.Cmd {
+	return createWorktreeCmd(repoRoot, branch, base)
+}
+
+// ValidBranchOrBaseName exposes the unexported validator for direct table
+// testing.
+func ValidBranchOrBaseName(s string) bool { return validBranchOrBaseName(s) }

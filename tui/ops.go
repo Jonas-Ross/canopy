@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,8 +49,9 @@ type worktreeCreatedMsg struct {
 }
 
 type procsKilledMsg struct {
-	count int
-	err   error
+	count   int
+	skipped int // procs skipped because /proc/<pid>/cwd no longer matches
+	err     error
 }
 
 type pulseExpiredMsg struct{}
@@ -66,7 +69,19 @@ func (m Model) focusedState() (aggregator.WorktreeState, bool) {
 		return aggregator.WorktreeState{}, false
 	}
 	state, ok := m.states[m.ordered[m.focusIndex]]
-	return state, ok
+	if !ok {
+		return aggregator.WorktreeState{}, false
+	}
+	// A worktree filtered out of the list cannot be the action target.
+	// Without this guard, d/p/K silently act on a row the user can't see
+	// (the cursor disappears when the filter hides the focused row).
+	if filter := m.activeFilter(); filter != "" {
+		branch := FormatBranch(state.Worktree.Branch, state.Worktree.Detached)
+		if !strings.Contains(strings.ToLower(branch), strings.ToLower(filter)) {
+			return aggregator.WorktreeState{}, false
+		}
+	}
+	return state, true
 }
 
 func openURLCmd(url string) tea.Cmd {
@@ -83,13 +98,22 @@ func openURLCmd(url string) tea.Cmd {
 		default:
 			c = exec.Command("xdg-open", url)
 		}
-		err := c.Start()
-		// Reap the child so it doesn't linger as a zombie. `open`/`xdg-open`
-		// exit quickly after spawning the browser.
-		if err == nil {
-			go func() { _ = c.Wait() }()
+		// Capture stderr so a non-zero exit (xdg-open returns 3 for
+		// "no method available", 4 for "action failed") surfaces the
+		// actual reason rather than a generic "exit status N". Run is
+		// short — open/xdg-open exit quickly after handing off to the
+		// browser.
+		var stderr bytes.Buffer
+		c.Stdout = io.Discard
+		c.Stderr = &stderr
+		if err := c.Run(); err != nil {
+			msg := strings.TrimSpace(stderr.String())
+			if msg == "" {
+				msg = err.Error()
+			}
+			return prOpenedMsg{err: fmt.Errorf("%s", msg)}
 		}
-		return prOpenedMsg{err: err}
+		return prOpenedMsg{}
 	}
 }
 
@@ -142,7 +166,7 @@ func removeWorktreeCmd(path string) tea.Cmd {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		c := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", path)
+		c := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", "--", path)
 		out, err := c.CombinedOutput()
 		if err != nil {
 			return worktreeRemovedMsg{path: path, err: fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))}
@@ -161,14 +185,23 @@ func (m Model) startKill() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func killProcsCmd(pids []int) tea.Cmd {
+func killProcsCmd(pids []int, expectedCwd string) tea.Cmd {
 	return func() tea.Msg {
 		if isDemoMode() {
 			return procsKilledMsg{count: len(pids)}
 		}
-		killed := 0
+		killed, skipped := 0, 0
 		var firstErr error
 		for _, pid := range pids {
+			// PID reuse defense: re-read /proc/<pid>/cwd and confirm it
+			// still path-prefix-matches the worktree we listed it under.
+			// If the original process died and a new one got the same
+			// PID, almost certainly its cwd no longer matches and we
+			// skip rather than signal an unrelated process.
+			if !pidCwdMatches(pid, expectedCwd) {
+				skipped++
+				continue
+			}
 			p, err := os.FindProcess(pid)
 			if err != nil {
 				if firstErr == nil {
@@ -184,7 +217,7 @@ func killProcsCmd(pids []int) tea.Cmd {
 			}
 			killed++
 		}
-		return procsKilledMsg{count: killed, err: firstErr}
+		return procsKilledMsg{count: killed, skipped: skipped, err: firstErr}
 	}
 }
 
@@ -269,18 +302,52 @@ func WorktreePath(repoRoot, branch string) string {
 	return filepath.Join(worktreeBaseDir(repoRoot), strings.ReplaceAll(branch, "/", "+"))
 }
 
+// validBranchOrBaseName allows the conservative subset of refname
+// characters Canopy needs: letters, digits, slashes for namespaces,
+// and the dash/dot/underscore punctuation. It explicitly rejects
+// names containing ".." (path traversal in the worktree base dir),
+// ":" (gitref syntax), and any leading dash (so `--upload-pack=…`
+// style flag injection through a positional arg is impossible).
+func validBranchOrBaseName(s string) bool {
+	if s == "" || strings.HasPrefix(s, "-") || strings.Contains(s, "..") {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '/' || r == '_' || r == '.' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func createWorktreeCmd(repoRoot, branch, base string) tea.Cmd {
 	return func() tea.Msg {
 		if repoRoot == "" {
 			return worktreeCreatedMsg{branch: branch, err: fmt.Errorf("repo root unknown")}
 		}
+		if !validBranchOrBaseName(branch) {
+			return worktreeCreatedMsg{branch: branch, err: fmt.Errorf("invalid branch name %q (allowed: [A-Za-z0-9._/-], no leading '-', no '..')", branch)}
+		}
+		if !validBranchOrBaseName(base) {
+			return worktreeCreatedMsg{branch: branch, err: fmt.Errorf("invalid base name %q (allowed: [A-Za-z0-9._/-], no leading '-', no '..')", base)}
+		}
 		path := WorktreePath(repoRoot, branch)
+		if isDemoMode() {
+			return worktreeCreatedMsg{branch: branch, path: path}
+		}
 		if err := os.MkdirAll(worktreeBaseDir(repoRoot), 0o755); err != nil {
 			return worktreeCreatedMsg{branch: branch, err: err}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		c := exec.CommandContext(ctx, "git", "-C", repoRoot, "worktree", "add", path, "-b", branch, base)
+		// `--` separates options from positional args so a path that
+		// somehow starts with '-' can never be parsed as a flag.
+		c := exec.CommandContext(ctx, "git", "-C", repoRoot, "worktree", "add", "-b", branch, "--", path, base)
 		out, err := c.CombinedOutput()
 		if err != nil {
 			return worktreeCreatedMsg{branch: branch, path: path, err: fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))}
