@@ -409,10 +409,7 @@ func (m Model) View() string {
 		width = 80
 	}
 
-	var sb strings.Builder
-
-	sb.WriteString(m.renderTitleBar(width))
-	sb.WriteString("\n\n")
+	title := m.renderTitleBar(width)
 
 	pulseFor := ""
 	if !m.pulseUntil.IsZero() && now.Before(m.pulseUntil) {
@@ -434,15 +431,34 @@ func (m Model) View() string {
 
 	list := renderWorktreeList(m.ordered, m.states, m.focusIndex, m.activeFilter(), now, listW, pulseFor)
 
+	body := list
 	if showDetail {
-		sb.WriteString(layoutWithDetail(list, renderDetailPane(focused, now), width))
-	} else {
-		sb.WriteString(list)
+		body = layoutWithDetail(list, renderDetailPane(focused, now), width)
 	}
+
+	footer := m.renderFooter(width)
+
+	// Pin the footer to the bottom of the terminal so the layout has a
+	// stable height — without this, body height changes (focus moving onto
+	// a worktree with a tall detail pane, items appearing/disappearing)
+	// cause the alt-screen to redraw with a different line count and the
+	// footer visibly jumps. Structure: title + blank + body + pad + blank
+	// + footer == m.height. Skip when m.height is unset or too small.
+	var pad string
+	if m.height > 0 {
+		used := lipgloss.Height(title) + 1 + lipgloss.Height(body) + 1 + lipgloss.Height(footer)
+		if m.height > used {
+			pad = strings.Repeat("\n", m.height-used)
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(title)
 	sb.WriteString("\n\n")
-
-	sb.WriteString(m.renderFooter(width))
-
+	sb.WriteString(body)
+	sb.WriteString(pad)
+	sb.WriteString("\n\n")
+	sb.WriteString(footer)
 	return sb.String()
 }
 

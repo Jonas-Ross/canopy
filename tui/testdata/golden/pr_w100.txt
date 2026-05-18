@@ -6,4 +6,25 @@
      fix/login                 ↓1            #41 ⌧ ✓ A       1d
      chore/deps                ↑2 ↓1         #40 ✗ ✗ C       3d
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   j/k nav  ·  ⏎ shell  ·  n new  ·  p PR  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─────────
