@@ -41,11 +41,17 @@ CI: `.github/workflows/ci.yml` runs `go vet`, `go build`, and `go test -race -co
 
 Tests are the merge gate, especially for TUI work. **`docs/validation.md` is the source of truth — read it before touching `tui/` or `cmd/demo*`.** Don't duplicate that doc here; the rules below are reminders.
 
+- **TDD is required for every feature and bugfix.** Red → green → refactor, no exceptions:
+  1. Write a failing test that pins the behavior you're about to add or fix. For a bug, the test must reproduce the bug and fail in the current tree before any production code changes.
+  2. Run the test and confirm it fails for the right reason (not a typo, not a missing import). Note the failure mode before moving on.
+  3. Write the minimum production code to make it pass. No drive-by features, no speculative abstractions.
+  4. Run the full package's tests (and `go test ./... -race` before the commit) to confirm green, then refactor with the test as the safety net.
+- **No "I'll add tests after" commits.** If you find yourself writing production code first, stop, revert, and start with the test. The only exception is exploratory spikes that you throw away before the real commit.
 - **The three-tier loop, cheapest first:**
   1. `go test ./... -race` — golden frames catch layout/glyph/reflow regressions. <1s, CI-gated.
   2. `canopy demo --script=tui/testdata/scripts/<scenario>.txt` — exercises the full `cmd/root.go`-shaped pipeline against a sandbox. Catches wiring bugs goldens can't see.
   3. `canopy demo --script=… --capture-png=…` — pipes ANSI through `freeze` for visual checks (colour, bold, glyph vs solid block). Requires `freeze` on PATH.
-- **When a golden changes:** read the diff, decide if it's intentional, then `go test ./tui -update` to re-bake and `git diff tui/testdata/golden/` to eyeball the new frames before committing.
+- **When a golden changes:** read the diff, decide if it's intentional, then `go test ./tui -update` to re-bake and `git diff tui/testdata/golden/` to eyeball the new frames before committing. Goldens are still TDD-compatible: write or extend the demo script first, watch the golden diff fail, then make the code produce the frame you want.
 - **Don't skip the demo loop on TUI changes.** Goldens prove the strings render; the demo script proves the pipeline wired them. Both, not either.
 - **Don't loosen tests to make CI green.** If a test fails, it's telling you something. Fix the code, or update the golden when the change is intentional and reviewed.
 
