@@ -402,6 +402,27 @@ func (m Model) activeFilter() string {
 	return m.filterStr
 }
 
+// wrappedRows returns the on-screen row count for s when rendered at the
+// given column width. Unlike lipgloss.Height (which counts only explicit
+// newlines), this accounts for soft-wrapping that the terminal applies to
+// lines wider than width — without it, footer/title variants that exceed
+// width get undercounted and the pad math overshoots m.height.
+func wrappedRows(s string, width int) int {
+	if width <= 0 {
+		return lipgloss.Height(s)
+	}
+	rows := 0
+	for _, line := range strings.Split(s, "\n") {
+		w := lipgloss.Width(line)
+		if w == 0 {
+			rows++
+			continue
+		}
+		rows += (w + width - 1) / width
+	}
+	return rows
+}
+
 func (m Model) View() string {
 	now := m.now()
 	width := m.width
@@ -442,9 +463,14 @@ func (m Model) View() string {
 	// are stretched to bodyTargetH so the pane's left border runs the full
 	// height; otherwise we pad below the list with blank lines. Skip when
 	// m.height is unset.
+	//
+	// Use wrappedRows for footer/title — the new-worktree footer can be
+	// wider than `width` and wrap to 2+ on-screen rows; lipgloss.Height
+	// only counts explicit \n, so without this we overpad and the footer
+	// drops off the bottom of the alt-screen.
 	bodyTargetH := 0
 	if m.height > 0 {
-		bodyTargetH = m.height - lipgloss.Height(title) - 1 - 1 - lipgloss.Height(footer)
+		bodyTargetH = m.height - wrappedRows(title, width) - 1 - 1 - wrappedRows(footer, width)
 	}
 
 	body := list
@@ -454,7 +480,7 @@ func (m Model) View() string {
 
 	var pad string
 	if bodyTargetH > 0 {
-		if extra := bodyTargetH - lipgloss.Height(body); extra > 0 {
+		if extra := bodyTargetH - wrappedRows(body, width); extra > 0 {
 			pad = strings.Repeat("\n", extra)
 		}
 	}

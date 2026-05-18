@@ -25,6 +25,4 @@
 
 
 
-
-
   new worktree    branch: feat/new-thing     base:   main     [tab] switch  [enter] create  [esc] cancel

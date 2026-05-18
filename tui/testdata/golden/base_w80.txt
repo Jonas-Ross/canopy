@@ -25,6 +25,4 @@
 
 
 
-
-
   j/k nav  ·  ⏎ shell  ·  n new  ·  p PR  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─
