@@ -13,13 +13,9 @@ import (
 const (
 	// callnum values for SYS_PROC_INFO.
 	procInfoCallListPIDs = 1
-	procInfoCallPIDInfo  = 2
 
 	// proc_listpids "type" argument.
 	procAllPIDs = 1
-
-	// proc_pidinfo "flavor" values.
-	procPIDVNodePathInfo = 9
 )
 
 // systemEnumerate walks the live process table via the proc_info
