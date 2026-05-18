@@ -100,6 +100,7 @@ func readCWD(pid int32) (string, bool) {
 	if errno != 0 {
 		return "", false
 	}
+	// n == procVNodePathInfoSize on success; we only need cdir (first half).
 	if int(n) < cdirPathOffset+maxPathLen {
 		return "", false
 	}

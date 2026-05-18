@@ -7,8 +7,8 @@
 // Portability:
 //
 //   - macOS is first-class. The darwin implementation enumerates pids
-//     via the proc_info syscall and reads cwd + argv via
-//     proc_pidinfo and KERN_PROCARGS2, with no cgo.
+//     via sysctl kern.proc.all and reads cwd + argv via proc_pidinfo
+//     and KERN_PROCARGS2, with no cgo.
 //   - Linux is supported. /proc/<pid>/cwd, /comm, /cmdline.
 //   - Other platforms (windows, *bsd, plan9, …) return ErrUnsupported.
 //     Callers should treat this as "no process data available" and
