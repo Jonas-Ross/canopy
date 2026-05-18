@@ -51,8 +51,6 @@ type procsKilledMsg struct {
 	err   error
 }
 
-type noticeClearedMsg struct{}
-
 type pulseExpiredMsg struct{}
 
 func (m Model) focusedState() (aggregator.WorktreeState, bool) {
@@ -88,14 +86,14 @@ func (m Model) handleOpenPR() (Model, tea.Cmd) {
 	state, ok := m.focusedState()
 	if !ok {
 		m.notice = noticeStyle.Render("no worktree focused")
-		return m, clearNoticeCmd()
+		return m, nil
 	}
 	if state.PR == nil || state.PR.URL == "" {
 		m.notice = noticeStyle.Render("no PR for " + FormatBranch(state.Worktree.Branch, state.Worktree.Detached))
-		return m, clearNoticeCmd()
+		return m, nil
 	}
 	m.notice = noticeStyle.Render("opening " + state.PR.URL)
-	return m, tea.Batch(openURLCmd(state.PR.URL), clearNoticeCmd())
+	return m, openURLCmd(state.PR.URL)
 }
 
 func (m Model) handleShellDrop() (Model, tea.Cmd) {
@@ -139,7 +137,7 @@ func (m Model) startKill() (Model, tea.Cmd) {
 	state, ok := m.focusedState()
 	if !ok || len(state.Procs) == 0 {
 		m.notice = noticeStyle.Render("no processes to kill")
-		return m, clearNoticeCmd()
+		return m, nil
 	}
 	m.mode = modeConfirmKill
 	return m, nil
@@ -211,7 +209,7 @@ func (m Model) updateNewWorktreeForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		base := strings.TrimSpace(m.newBaseInput.Value())
 		if branch == "" {
 			m.notice = errorStyle.Render("branch name required")
-			return m, clearNoticeCmd()
+			return m, nil
 		}
 		if base == "" {
 			base = "main"
@@ -265,10 +263,4 @@ func createWorktreeCmd(repoRoot, branch, base string) tea.Cmd {
 		}
 		return worktreeCreatedMsg{branch: branch, path: path}
 	}
-}
-
-func clearNoticeCmd() tea.Cmd {
-	return tea.Tick(4*time.Second, func(time.Time) tea.Msg {
-		return noticeClearedMsg{}
-	})
 }

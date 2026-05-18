@@ -51,7 +51,6 @@ type Model struct {
 	newFormFocus   int
 
 	notice string
-	footer string
 
 	pulsePath  string
 	pulseUntil time.Time
@@ -68,7 +67,6 @@ func NewModel(r Refresher) tea.Model {
 		width:       80,
 		states:      make(map[string]aggregator.WorktreeState),
 		filterInput: ti,
-		footer:      footerHelp,
 		now:         time.Now,
 	}
 }
@@ -115,14 +113,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prOpenedMsg:
 		if msg.err != nil {
 			m.notice = errorStyle.Render("open PR failed: " + msg.err.Error())
+		} else {
+			// browser opened — dismiss the "opening..." placeholder
+			m.notice = ""
 		}
-		return m, clearNoticeCmd()
+		return m, nil
 
 	case shellDroppedMsg:
 		if msg.err != nil {
 			m.notice = errorStyle.Render("shell exited with error: " + msg.err.Error())
 		}
-		return m, clearNoticeCmd()
+		return m, nil
 
 	case worktreeRemovedMsg:
 		if msg.err != nil {
@@ -131,7 +132,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeStyle.Render("pruned " + msg.path)
 			m.refresher.Refresh()
 		}
-		return m, clearNoticeCmd()
+		return m, nil
 
 	case worktreeCreatedMsg:
 		if msg.err != nil {
@@ -140,7 +141,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeStyle.Render("created " + msg.branch + " at " + msg.path)
 			m.refresher.Refresh()
 		}
-		return m, clearNoticeCmd()
+		return m, nil
 
 	case procsKilledMsg:
 		switch {
@@ -152,10 +153,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeStyle.Render(fmt.Sprintf("sent SIGTERM to %d procs", msg.count))
 		}
 		m.refresher.Refresh()
-		return m, clearNoticeCmd()
-
-	case noticeClearedMsg:
-		m.notice = ""
 		return m, nil
 
 	case tea.KeyMsg:
@@ -166,6 +163,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Any keypress dismisses a pending notice. Handlers may set a new notice
+	// after this; that new value sticks until the *next* keypress.
+	m.notice = ""
+
 	switch m.mode {
 	case modeFiltering:
 		return m.updateFilterInput(msg)
@@ -204,7 +205,7 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filterInput.SetValue(m.filterStr)
 			m.filterInput.Focus()
 		case keyForensics:
-			m.footer = footerForensics
+			m.notice = dimStyle.Render(footerForensics)
 		case keyNew:
 			out, cmd := m.startNewWorktree()
 			return out, cmd
@@ -226,11 +227,10 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.moveFocus(-1)
 
 	case msg.Type == tea.KeyTab:
-		m.footer = footerTab
+		m.notice = dimStyle.Render(footerTab)
 
 	case msg.Type == tea.KeyEsc:
 		m.filterStr = ""
-		m.footer = footerHelp
 	}
 
 	return m, nil
@@ -242,7 +242,6 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterStr = m.filterInput.Value()
 		m.mode = modeNormal
 		m.filterInput.Blur()
-		m.footer = footerHelp
 		return m, nil
 
 	case tea.KeyEsc:
@@ -250,7 +249,6 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterInput.SetValue("")
 		m.mode = modeNormal
 		m.filterInput.Blur()
-		m.footer = footerHelp
 		return m, nil
 
 	default:
@@ -410,13 +408,10 @@ func (m Model) renderFooter(width int) string {
 		return "  " + promptStyle.Render("new worktree") + "    " + m.newBranchInput.View() + "    " + m.newBaseInput.View() + "    " + keyDescStyle.Render("[tab] switch  [enter] create  [esc] cancel")
 	}
 
-	// Transient notice (errors, action results) takes over the footer briefly.
+	// Transient notice (errors, action results, f/tab stubs). Cleared on the
+	// next keypress by handleKey.
 	if m.notice != "" {
 		return "  " + m.notice
-	}
-	// Transient footer set by f/tab.
-	if m.footer != footerHelp {
-		return "  " + dimStyle.Render(m.footer)
 	}
 
 	var chunks []string
