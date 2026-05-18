@@ -1,6 +1,6 @@
 module github.com/jonasross/canopy
 
-go 1.25.0
+go 1.24.2
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
@@ -9,7 +9,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.9.1
-	golang.org/x/sys v0.44.0
+	golang.org/x/sys v0.38.0
 )
 
 require (
