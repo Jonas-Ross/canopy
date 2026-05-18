@@ -55,7 +55,7 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 
 - `sessions/` — Claude Code JSONL parsing/indexing. Surface: `Open`, `Sessions`, `Query`, `Hydrate`, `Events`, `Tail`. Pure.
 - `git/` — worktree enumeration, status, ahead/behind. Shells out to `git`.
-- `procs/` — process listing by cwd. Linux-first (`/proc/*/cwd`); macOS stubbed with a build tag.
+- `procs/` — process listing by cwd. macOS-first (sysctl `kern.proc.all` + `proc_pidinfo` + `KERN_PROCARGS2`, no cgo); Linux supported (`/proc/*/cwd`). Other platforms return `ErrUnsupported` and the aggregator soft-degrades.
 - `pr/` — `gh` CLI wrapper with a 30s cache. Single `gh pr list --json …` per repo.
 - `aggregator/` — joins all four sources into per-worktree state. Owns `CwdPrefix` correlation. Provides `Snapshot` and `Subscribe`.
 - `tui/` — bubbletea views. Operational tab in v1; analytical tab in v2.
@@ -70,7 +70,7 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - `CwdPrefix` is the worktree↔session correlation key. Prefix match, not exact.
 - Tests are first-class. Every package gets tests. CI gates on `go test -race`.
 - No daemon for v1. Design the data layer so a daemon is a future plumbing addition, not a redesign.
-- Linux-first. macOS process detection is a stubbed build-tag file; degrade gracefully, don't crash.
+- macOS-first; Linux supported. Other platforms degrade gracefully — never crash on missing OS support.
 - Cobra from day one, even when v1 is single-command. Subcommand surface should accommodate `canopy worktree`, `canopy sessions`, `canopy prune` later.
 - Anthropic's JSONL schema is theirs to change. Normalize into a stable internal `Event` type so there's one place to fix when it shifts.
 

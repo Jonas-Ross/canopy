@@ -72,6 +72,6 @@ type Config struct {
 	// falls back to the real package functions.
 	listWorktrees  func(ctx context.Context, repoRoot string) ([]git.Worktree, error)
 	worktreeStatus func(ctx context.Context, path string) (git.Worktree, error)
-	listProcs      func(ctx context.Context, prefix string) ([]procs.Process, error)
+	listProcsByPrefixes func(ctx context.Context, prefixes []string) (map[string][]procs.Process, error)
 	now            func() time.Time
 }

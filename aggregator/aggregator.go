@@ -66,8 +66,8 @@ func withDefaults(cfg Config) Config {
 	if cfg.worktreeStatus == nil {
 		cfg.worktreeStatus = git.WorktreeStatus
 	}
-	if cfg.listProcs == nil {
-		cfg.listProcs = procs.ListByCwdPrefix
+	if cfg.listProcsByPrefixes == nil {
+		cfg.listProcsByPrefixes = procs.ListByCwdPrefixes
 	}
 	if cfg.now == nil {
 		cfg.now = time.Now
@@ -80,6 +80,17 @@ func withDefaults(cfg Config) Config {
 	return cfg
 }
 
+// visit is one (repo, worktree) tuple captured during walkAll, used to
+// defer buildState calls until after a single batched procs snapshot
+// has been taken across every worktree in the walk.
+type visit struct {
+	repo     Repo
+	wt       git.Worktree
+	siblings []string
+	prs      []pr.PR
+	prStale  bool
+}
+
 // Snapshot returns the current state of every worktree across all
 // configured Repos. Synchronous; runs git/procs/pr/sessions queries
 // inline. Safe to call before Start.
@@ -88,14 +99,29 @@ func withDefaults(cfg Config) Config {
 // from ListWorktrees and do not abort the snapshot. List-worktrees
 // failure for a repo aborts the snapshot and is returned wrapped.
 func (a *Aggregator) Snapshot(ctx context.Context) ([]WorktreeState, error) {
-	var out []WorktreeState
+	var visits []visit
 	err := a.walkAll(ctx, func(repo Repo, wt git.Worktree, siblings []string, prs []pr.PR, prStale bool) {
-		out = append(out, a.buildState(ctx, repo, wt, siblings, prs, prStale))
+		visits = append(visits, visit{repo, wt, siblings, prs, prStale})
 	}, nil)
 	if err != nil {
 		return nil, err
 	}
+	procsByPrefix := a.procsSnapshot(ctx, visitPrefixes(visits))
+	out := make([]WorktreeState, 0, len(visits))
+	for _, v := range visits {
+		out = append(out, a.buildState(ctx, v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix))
+	}
 	return out, nil
+}
+
+// visitPrefixes extracts the worktree paths from a slice of visits,
+// preserving order. Used to feed procsSnapshot.
+func visitPrefixes(visits []visit) []string {
+	prefixes := make([]string, len(visits))
+	for i, v := range visits {
+		prefixes[i] = v.wt.Path
+	}
+	return prefixes
 }
 
 // walkAll iterates every (repo, worktree) pair across configured Repos,
@@ -128,12 +154,28 @@ func (a *Aggregator) walkAll(ctx context.Context, visit func(repo Repo, wt git.W
 	return nil
 }
 
+// procsSnapshot is a one-shot batched procs walk across every prefix
+// the caller cares about. Failures are soft-degraded: an error returns
+// an empty map so buildState's bucket lookup simply finds no entry
+// and leaves Procs as the zero slice. Same shape as the per-pid
+// silent-skip behavior in procs/.
+func (a *Aggregator) procsSnapshot(ctx context.Context, prefixes []string) map[string][]procs.Process {
+	if len(prefixes) == 0 {
+		return map[string][]procs.Process{}
+	}
+	m, err := a.cfg.listProcsByPrefixes(ctx, prefixes)
+	if err != nil {
+		return map[string][]procs.Process{}
+	}
+	return m
+}
+
 // buildState joins git/pr/procs/session data for one worktree. siblings is
 // the list of every worktree path in the same repo — used to attribute a
 // prefix-matched session or process to the deepest containing worktree
 // (e.g. a session under /repo/.worktrees/feat must NOT also appear under
 // /repo).
-func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree, siblings []string, prList []pr.PR, prStale bool) WorktreeState {
+func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree, siblings []string, prList []pr.PR, prStale bool, procsByPrefix map[string][]procs.Process) WorktreeState {
 	state := WorktreeState{
 		Repo:      repo,
 		Worktree:  wt,
@@ -149,8 +191,7 @@ func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree,
 		state.Worktree = full
 	}
 
-	if ps, err := a.cfg.listProcs(ctx, state.Worktree.Path); err == nil && ps != nil {
-		state.Procs = ps[:0]
+	if ps, ok := procsByPrefix[state.Worktree.Path]; ok {
 		for _, p := range ps {
 			if longestMatchingPath(p.Cwd, siblings) == state.Worktree.Path {
 				state.Procs = append(state.Procs, p)
