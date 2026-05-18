@@ -11,12 +11,8 @@ import (
 
 // Darwin proc_info syscall arguments. See xnu's bsd/sys/proc_info.h.
 const (
-	// callnum values for SYS_PROC_INFO.
-	procInfoCallListPIDs = 1
-	procInfoCallPIDInfo  = 2
-
-	// proc_listpids "type" argument.
-	procAllPIDs = 1
+	// callnum value for SYS_PROC_INFO.
+	procInfoCallPIDInfo = 2
 
 	// proc_pidinfo "flavor" values.
 	procPIDVNodePathInfo = 9
@@ -54,10 +50,10 @@ func systemEnumerate(ctx context.Context) ([]Process, error) {
 	return out, nil
 }
 
-// listAllPIDs returns every visible pid using sysctl kern.proc.all.
-// proc_listpids (SYS_PROC_INFO callnum=1) is restricted on macOS 26+
-// (Tahoe) when the binary is unsigned; sysctl kern.proc.all works for
-// any process without special entitlements.
+// listAllPIDs returns every visible pid via sysctl kern.proc.all.
+// This is the documented public API and works for unsigned binaries
+// on macOS 26+ (Tahoe), where the proc_info listpids path is
+// restricted without an entitlement.
 func listAllPIDs() ([]int32, error) {
 	procs, err := unix.SysctlKinfoProcSlice("kern.proc.all")
 	if err != nil {
