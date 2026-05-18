@@ -26,9 +26,24 @@ import (
 	"strings"
 )
 
-// enumerator is the platform enumerate function. Tests swap it to
-// inject a fake process list.
+// enumerator is the platform enumerate function. Tests and the demo
+// subcommand swap it via SetEnumerator to inject a fake process list.
 var enumerator = enumerate
+
+// Enumerator matches the platform enumerate signature: given a context, return
+// the full process list visible to the current user. Implementations are
+// expected to honor ctx for prompt cancellation.
+type Enumerator func(ctx context.Context) ([]Process, error)
+
+// SetEnumerator swaps the package-level enumerator with fn and returns a
+// function that restores the previous one. The caller is expected to defer
+// the restore. Intended for tests and the demo harness; production code
+// should never call this.
+func SetEnumerator(fn Enumerator) (restore func()) {
+	prev := enumerator
+	enumerator = fn
+	return func() { enumerator = prev }
+}
 
 // Process is one entry in the result of ListByCwdPrefix /
 // ListByCwdPrefixes.

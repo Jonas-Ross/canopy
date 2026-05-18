@@ -12,6 +12,8 @@ const (
 	keyOpenPR    = 'p'
 	// keyKill is uppercase K because lowercase k is bound to up-nav.
 	keyKill = 'K'
+	// keyProcsToggle is uppercase P because lowercase p opens the PR.
+	keyProcsToggle = 'P'
 )
 
 const (
@@ -27,10 +29,11 @@ var footerKeys = []struct{ key, desc string }{
 	{"n", "new"},
 	{"d", "prune"},
 	{"p", "PR"},
+	{"P", "procs"},
 	{"K", "kill"},
 	{"r", "refresh"},
 	{"/", "filter"},
 	{"q", "quit"},
 }
 
-const footerHelp = "j/k nav · ⏎ shell · n new · d prune · p PR · K kill · r refresh · / filter · q quit"
+const footerHelp = "j/k nav · ⏎ shell · n new · d prune · p PR · P procs · K kill · r refresh · / filter · q quit"

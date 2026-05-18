@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jonasross/canopy/aggregator"
+	"github.com/jonasross/canopy/internal/demo"
 	"github.com/jonasross/canopy/procs"
 	"github.com/jonasross/canopy/tui"
 )
@@ -156,6 +157,23 @@ func TestPulse_RawFramesDifferAcrossActiveExpired(t *testing.T) {
 	if !hasYellow {
 		t.Errorf("active pulse frame contains no yellow SGR (33/93) — livePulseStyle may have drifted; raw=%q", active)
 	}
+}
+
+func TestGolden_ProcsPanelCollapsed(t *testing.T) {
+	fixtures := scenarioFixtures()
+	fixtures[1].Procs = demo.HeavyProcs(fixtures[1].Path)
+	m := buildModel(t, fixtures, 140, 40)
+	m, _ = m.Update(sendKey('j'))
+	assertGolden(t, "procs_panel_collapsed", frame(m))
+}
+
+func TestGolden_ProcsPanelExpanded(t *testing.T) {
+	fixtures := scenarioFixtures()
+	fixtures[1].Procs = demo.HeavyProcs(fixtures[1].Path)
+	m := buildModel(t, fixtures, 140, 40)
+	m, _ = m.Update(sendKey('j'))
+	m, _ = m.Update(sendKey('P'))
+	assertGolden(t, "procs_panel_expanded", frame(m))
 }
 
 func TestGolden_DetachedHead(t *testing.T) {

@@ -15,8 +15,18 @@
                                                                               │  ci          ✓ passing
                                                                               │  review      review required
                                                                               │
+                                                                              │  Processes
+                                                                              │  11201   claude
+                                                                              │  11200   claude
+                                                                              │  11150   go
+                                                                              │  11140   npm
+                                                                              │  11102   zsh
+                                                                              │  +9 more (P)
+                                                                              │
                                                                               │  Sessions
                                                                               │  ● claude-opus-4-7  now
+                                                                              │
+                                                                              │
                                                                               │
                                                                               │
                                                                               │

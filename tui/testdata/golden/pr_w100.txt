@@ -25,4 +25,4 @@
 
 
 
-  j/k nav  ·  ⏎ shell  ·  n new  ·  p PR  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─────────
+  j/k nav  ·  ⏎ shell  ·  n new  ·  p PR  ·  P procs  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─

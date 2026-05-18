@@ -15,14 +15,24 @@
                                                                               │  ci          ✓ passing
                                                                               │  review      review required
                                                                               │
+                                                                              │  Processes
+                                                                              │  11201   claude
+                                                                              │  11200   claude
+                                                                              │  11150   go
+                                                                              │  11140   npm
+                                                                              │  11102   zsh
+                                                                              │  11101   zsh
+                                                                              │  11100   zsh
+                                                                              │  11050   gopls
+                                                                              │  11030   python
+                                                                              │  11021   node
+                                                                              │  11020   node
+                                                                              │  10900   uv
+                                                                              │  10860   Cursor Helper
+                                                                              │  10850   Cursor Helper
+                                                                              │
                                                                               │  Sessions
                                                                               │  ● claude-opus-4-7  now
-                                                                              │
-                                                                              │
-                                                                              │
-                                                                              │
-                                                                              │
-                                                                              │
                                                                               │
 
   j/k nav  ·  ⏎ shell  ·  n new  ·  d prune  ·  p PR  ·  P procs  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─────────────────────────

@@ -55,6 +55,8 @@ type Model struct {
 	pulsePath  string
 	pulseUntil time.Time
 
+	procsExpanded map[string]bool
+
 	now func() time.Time
 }
 
@@ -63,11 +65,12 @@ func NewModel(r Refresher) tea.Model {
 	ti := textinput.New()
 	ti.Prompt = filterPrompt
 	return Model{
-		refresher:   r,
-		width:       80,
-		states:      make(map[string]aggregator.WorktreeState),
-		filterInput: ti,
-		now:         time.Now,
+		refresher:     r,
+		width:         80,
+		states:        make(map[string]aggregator.WorktreeState),
+		procsExpanded: make(map[string]bool),
+		filterInput:   ti,
+		now:           time.Now,
 	}
 }
 
@@ -239,6 +242,8 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case keyKill:
 			out, cmd := m.startKill()
 			return out, cmd
+		case keyProcsToggle:
+			m = m.toggleFocusedProcsExpansion()
 		}
 
 	case msg.Type == tea.KeyDown:
@@ -364,6 +369,7 @@ func (m Model) removeWorktree(path string) Model {
 		return m
 	}
 	delete(m.states, path)
+	delete(m.procsExpanded, path)
 	for i, p := range m.ordered {
 		if p == path {
 			m.ordered = append(m.ordered[:i], m.ordered[i+1:]...)
@@ -392,6 +398,15 @@ func (m Model) moveFocus(delta int) Model {
 		next = n - 1
 	}
 	m.focusIndex = next
+	return m
+}
+
+func (m Model) toggleFocusedProcsExpansion() Model {
+	state, ok := m.focusedState()
+	if !ok {
+		return m
+	}
+	m.procsExpanded[state.Worktree.Path] = !m.procsExpanded[state.Worktree.Path]
 	return m
 }
 
@@ -466,7 +481,7 @@ func (m Model) View() string {
 
 	body := list
 	if showDetail {
-		body = layoutWithDetail(list, renderDetailPane(focused, now, bodyTargetH), width)
+		body = layoutWithDetail(list, renderDetailPane(focused, now, bodyTargetH, m.procsExpanded[focused.Worktree.Path]), width)
 	}
 
 	var pad string
