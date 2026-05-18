@@ -187,7 +187,6 @@ func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree,
 	}
 
 	if ps, ok := procsByPrefix[state.Worktree.Path]; ok {
-		state.Procs = ps[:0]
 		for _, p := range ps {
 			if longestMatchingPath(p.Cwd, siblings) == state.Worktree.Path {
 				state.Procs = append(state.Procs, p)

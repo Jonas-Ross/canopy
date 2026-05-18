@@ -554,10 +554,11 @@ func TestSnapshot_NestedWorktreeSessionsAttributeToDeepest(t *testing.T) {
 			},
 		},
 		procs: map[string][]procs.Process{
-			// `listProcs(prefix)` is called once per worktree. The /repo query
-			// returns both processes (string prefix); the /repo/.worktrees/feat
-			// query returns only the nested one. Aggregator must filter the
-			// /repo result so the nested proc lands only on the nested worktree.
+			// listProcsByPrefixes is called once with both prefixes. The /repo
+			// bucket contains both processes (a prefix match); the
+			// /repo/.worktrees/feat bucket contains only the nested one.
+			// buildState must filter so the nested process lands only on the
+			// nested worktree, not on /repo.
 			mainWT:   {{Pid: 100, Cwd: mainWT, Command: "shell"}, {Pid: 200, Cwd: nestedWT, Command: "claude"}},
 			nestedWT: {{Pid: 200, Cwd: nestedWT, Command: "claude"}},
 		},
