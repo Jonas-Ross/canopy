@@ -137,11 +137,16 @@ func (f *Fixture) initRepo() error {
 	if err := f.run("git", "init", "-q", "-b", "main", "."); err != nil {
 		return err
 	}
-	readme := filepath.Join(f.RepoRoot, "README.md")
-	if err := os.WriteFile(readme, []byte("# canopy demo\n"), 0o644); err != nil {
-		return err
+	files := map[string]string{
+		"README.md":  "# canopy demo\n",
+		".gitignore": ".worktrees/\n",
 	}
-	if err := f.run("git", "add", "README.md"); err != nil {
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(f.RepoRoot, name), []byte(body), 0o644); err != nil {
+			return err
+		}
+	}
+	if err := f.run("git", "add", "README.md", ".gitignore"); err != nil {
 		return err
 	}
 	return f.run("git", "commit", "-q", "-m", "init")

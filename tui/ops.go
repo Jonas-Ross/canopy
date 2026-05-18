@@ -53,6 +53,14 @@ type procsKilledMsg struct {
 
 type pulseExpiredMsg struct{}
 
+// isDemoMode reports whether the binary is running under `canopy demo`. The
+// flag short-circuits any operation that would otherwise touch the user's
+// real environment (browser, processes, worktree tree) so an automated
+// validation script can't escape the sandbox even by accident.
+func isDemoMode() bool {
+	return os.Getenv("CANOPY_DEMO") == "1"
+}
+
 func (m Model) focusedState() (aggregator.WorktreeState, bool) {
 	if m.focusIndex < 0 || m.focusIndex >= len(m.ordered) {
 		return aggregator.WorktreeState{}, false
@@ -63,6 +71,9 @@ func (m Model) focusedState() (aggregator.WorktreeState, bool) {
 
 func openURLCmd(url string) tea.Cmd {
 	return func() tea.Msg {
+		if isDemoMode() {
+			return prOpenedMsg{}
+		}
 		var c *exec.Cmd
 		switch runtime.GOOS {
 		case "darwin":
@@ -101,6 +112,10 @@ func (m Model) handleShellDrop() (Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	if isDemoMode() {
+		m.notice = noticeStyle.Render("demo: would drop into shell at " + state.Worktree.Path)
+		return m, nil
+	}
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -122,6 +137,9 @@ func (m Model) startPrune() (Model, tea.Cmd) {
 
 func removeWorktreeCmd(path string) tea.Cmd {
 	return func() tea.Msg {
+		if isDemoMode() {
+			return worktreeRemovedMsg{path: path}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		c := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", path)
@@ -145,6 +163,9 @@ func (m Model) startKill() (Model, tea.Cmd) {
 
 func killProcsCmd(pids []int) tea.Cmd {
 	return func() tea.Msg {
+		if isDemoMode() {
+			return procsKilledMsg{count: len(pids)}
+		}
 		killed := 0
 		var firstErr error
 		for _, pid := range pids {

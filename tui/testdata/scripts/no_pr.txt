@@ -1,0 +1,6 @@
+# `p` on `main` (which has no PR) should produce the no-PR notice.
+width 140
+height 40
+wait 200ms
+keys p
+capture /tmp/canopy-demo-no-pr.txt
