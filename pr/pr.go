@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,6 +42,10 @@ type PR struct {
 	URL         string
 }
 
+// seamsMu guards lookPath and runCmd. The read paths are hot (List
+// per repo), the write path is rare (test setup, demo wiring) —
+// RWMutex is the right shape.
+var seamsMu sync.RWMutex
 var lookPath = exec.LookPath
 
 // runCmd is the seam every external invocation in this package goes
@@ -52,6 +57,18 @@ var runCmd = func(ctx context.Context, workingDir, name string, args ...string) 
 	return cmd.Output()
 }
 
+func getRunCmd() RunCmdFunc {
+	seamsMu.RLock()
+	defer seamsMu.RUnlock()
+	return runCmd
+}
+
+func getLookPath() func(string) (string, error) {
+	seamsMu.RLock()
+	defer seamsMu.RUnlock()
+	return lookPath
+}
+
 // RunCmdFunc is the shape of the exec seam swapped by SetRunCmd.
 type RunCmdFunc func(ctx context.Context, workingDir, name string, args ...string) ([]byte, error)
 
@@ -59,6 +76,8 @@ type RunCmdFunc func(ctx context.Context, workingDir, name string, args ...strin
 // previous value so callers (tests, the demo subcommand) can restore it.
 // Production code does not call this.
 func SetRunCmd(fn RunCmdFunc) RunCmdFunc {
+	seamsMu.Lock()
+	defer seamsMu.Unlock()
 	prev := runCmd
 	runCmd = fn
 	return prev
@@ -97,7 +116,7 @@ type ghCheckRoll struct {
 // reports an auth failure on stderr, and a wrapped error for any
 // other exec or parse failure.
 func List(ctx context.Context, repoRoot string) ([]PR, error) {
-	if _, err := lookPath("gh"); err != nil {
+	if _, err := getLookPath()("gh"); err != nil {
 		return nil, ErrNoGH
 	}
 
@@ -107,7 +126,7 @@ func List(ctx context.Context, repoRoot string) ([]PR, error) {
 		"--state", "all",
 		"--limit", ghPRListLimit,
 	}
-	out, err := runCmd(ctx, repoRoot, "gh", args...)
+	out, err := getRunCmd()(ctx, repoRoot, "gh", args...)
 	if err != nil {
 		return nil, classifyGHErr(err)
 	}

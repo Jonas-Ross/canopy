@@ -12,9 +12,8 @@ import (
 // the original on cleanup.
 func stubRun(t *testing.T, fn func(ctx context.Context, dir, name string, args ...string) ([]byte, error)) {
 	t.Helper()
-	orig := runCmd
-	runCmd = fn
-	t.Cleanup(func() { runCmd = orig })
+	orig := SetRunCmd(fn)
+	t.Cleanup(func() { SetRunCmd(orig) })
 }
 
 // stubLookPath replaces lookPath for the duration of a test. Pass an
@@ -22,6 +21,7 @@ func stubRun(t *testing.T, fn func(ctx context.Context, dir, name string, args .
 // happy "binary found" case (the returned path is irrelevant).
 func stubLookPath(t *testing.T, err error) {
 	t.Helper()
+	seamsMu.Lock()
 	orig := lookPath
 	lookPath = func(name string) (string, error) {
 		if err != nil {
@@ -29,7 +29,12 @@ func stubLookPath(t *testing.T, err error) {
 		}
 		return "/usr/local/bin/" + name, nil
 	}
-	t.Cleanup(func() { lookPath = orig })
+	seamsMu.Unlock()
+	t.Cleanup(func() {
+		seamsMu.Lock()
+		lookPath = orig
+		seamsMu.Unlock()
+	})
 }
 
 const fixtureHappy = `[

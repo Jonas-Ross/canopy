@@ -33,10 +33,7 @@ type fakeResponse struct {
 // driven by responses keyed on cmdKey. Restores the original on cleanup.
 func installFakeRunner(t *testing.T, responses map[cmdKey]fakeResponse) {
 	t.Helper()
-	orig := runCmd
-	t.Cleanup(func() { runCmd = orig })
-
-	runCmd = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	orig := setRunCmd(func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name != "git" {
 			t.Fatalf("unexpected binary %q", name)
 		}
@@ -46,7 +43,8 @@ func installFakeRunner(t *testing.T, responses map[cmdKey]fakeResponse) {
 			t.Fatalf("no fake response registered for %q (args=%v)", key, args)
 		}
 		return resp.out, resp.err
-	}
+	})
+	t.Cleanup(func() { setRunCmd(orig) })
 }
 
 // classify reduces an argv to the cmdKey by skipping the leading

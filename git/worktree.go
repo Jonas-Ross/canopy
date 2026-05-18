@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,10 +37,32 @@ type Commit struct {
 	When    time.Time
 }
 
+// runCmdMu guards runCmd. Reads are hot (every ListWorktrees/Status
+// invocation); writes happen only from in-package test helpers.
+var runCmdMu sync.RWMutex
+
 // runCmd is the seam every git invocation goes through. Tests replace
-// it to return fixture bytes.
+// it via setRunCmd to return fixture bytes.
 var runCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+type runCmdFunc func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+func getRunCmd() runCmdFunc {
+	runCmdMu.RLock()
+	defer runCmdMu.RUnlock()
+	return runCmd
+}
+
+// setRunCmd swaps runCmd under the write lock and returns the previous
+// value. In-package only — used by the test helpers in worktree_test.go.
+func setRunCmd(fn runCmdFunc) runCmdFunc {
+	runCmdMu.Lock()
+	defer runCmdMu.Unlock()
+	prev := runCmd
+	runCmd = fn
+	return prev
 }
 
 // ListWorktrees enumerates all worktrees of the repo at repoRoot. It
@@ -47,7 +70,7 @@ var runCmd = func(ctx context.Context, name string, args ...string) ([]byte, err
 // status detail (DirtyFiles, Ahead/Behind, LastCommit) is left zero.
 // Callers needing detail must invoke WorktreeStatus for each path.
 func ListWorktrees(ctx context.Context, repoRoot string) ([]Worktree, error) {
-	out, err := runCmd(ctx, "git", "-C", repoRoot, "worktree", "list", "--porcelain")
+	out, err := getRunCmd()(ctx, "git", "-C", repoRoot, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, fmt.Errorf("git: list worktrees: %w", err)
 	}
@@ -94,7 +117,7 @@ func WorktreeStatus(ctx context.Context, path string) (Worktree, error) {
 // when HEAD is detached. symbolic-ref exits non-zero on detach; that
 // is the normal state, not an error.
 func readHeadBranch(ctx context.Context, path string) (string, bool, error) {
-	out, err := runCmd(ctx, "git", "-C", path, "symbolic-ref", "--short", "HEAD")
+	out, err := getRunCmd()(ctx, "git", "-C", path, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		if isDetachedHeadErr(err) {
 			return "", true, nil
@@ -108,7 +131,7 @@ func readHeadBranch(ctx context.Context, path string) (string, bool, error) {
 // of non-empty lines. v1 is pinned because v2 reordered columns; we
 // want stable output across git versions.
 func readDirtyCount(ctx context.Context, path string) (int, error) {
-	out, err := runCmd(ctx, "git", "-C", path, "status", "--porcelain=v1")
+	out, err := getRunCmd()(ctx, "git", "-C", path, "status", "--porcelain=v1")
 	if err != nil {
 		return 0, err
 	}
@@ -126,7 +149,7 @@ func readDirtyCount(ctx context.Context, path string) (int, error) {
 // configured for branch" on stderr; that case yields hasUpstream=false
 // with no propagated error.
 func readAheadBehind(ctx context.Context, path string) (ahead, behind int, hasUpstream bool, err error) {
-	out, runErr := runCmd(ctx, "git", "-C", path, "rev-list", "--left-right", "--count", "@{u}...HEAD")
+	out, runErr := getRunCmd()(ctx, "git", "-C", path, "rev-list", "--left-right", "--count", "@{u}...HEAD")
 	if runErr != nil {
 		if isNoUpstreamErr(runErr) {
 			return 0, 0, false, nil
@@ -152,7 +175,7 @@ func readAheadBehind(ctx context.Context, path string) (ahead, behind int, hasUp
 // parses the NUL-separated record. NUL is the only safe separator: a
 // commit subject can contain any printable character including tabs.
 func readLastCommit(ctx context.Context, path string) (Commit, error) {
-	out, err := runCmd(ctx, "git", "-C", path, "log", "-1", "--format=%h%x00%s%x00%an%x00%cI")
+	out, err := getRunCmd()(ctx, "git", "-C", path, "log", "-1", "--format=%h%x00%s%x00%an%x00%cI")
 	if err != nil {
 		return Commit{}, err
 	}
