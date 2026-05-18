@@ -139,6 +139,32 @@ func TestUpdate_PruneKey_EntersConfirmMode(t *testing.T) {
 	}
 }
 
+// Regression: pressing d on the primary worktree must not arm the prune flow.
+func TestUpdate_PruneKey_OnMainWorktree_NoConfirm(t *testing.T) {
+	rf := &fakeRefresher{}
+	m := tui.NewModel(rf)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 220, Height: 40})
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/r",
+		State: aggregator.WorktreeState{
+			Repo:     aggregator.Repo{Root: "/r", Name: "r"},
+			Worktree: git.Worktree{Path: "/r", Branch: "main", Main: true},
+		},
+	}))
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+	if got := tui.ModeOf(m); got != tui.ModeNormalForTest {
+		t.Errorf("mode = %d after d on main worktree, want %d (normal — prune must be refused)", got, tui.ModeNormalForTest)
+	}
+	view := m.View()
+	if strings.Contains(view, "prune main?") {
+		t.Errorf("View after pressing d on main worktree still shows prune confirm prompt; view=%q", view)
+	}
+	if !strings.Contains(view, "cannot prune") {
+		t.Errorf("View after pressing d on main worktree missing 'cannot prune' notice; view=%q", view)
+	}
+}
+
 func TestUpdate_KillKey_EntersConfirmMode(t *testing.T) {
 	m := newPopulatedModel(t)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})

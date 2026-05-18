@@ -810,6 +810,54 @@ func TestSnapshot_PerWorktreeStatusFailure(t *testing.T) {
 	}
 }
 
+// Regression: ListWorktrees populates Main on the primary worktree, but
+// WorktreeStatus does not. buildState replaces the worktree state with the
+// status result, so Main (like Bare) must be preserved across the merge —
+// otherwise the TUI's "cannot prune primary worktree" guard never fires.
+func TestSnapshot_PreservesMainAcrossStatusMerge(t *testing.T) {
+	now := fixedNow()
+	repoRoot := "/repo"
+	primary := "/repo"
+	secondary := "/repo/.worktrees/feat-a"
+
+	store := openTestSessionStore(t, func(root string) {})
+
+	fakes := &fakeSources{
+		worktrees: map[string][]git.Worktree{
+			repoRoot: {
+				{Path: primary, Branch: "main", Main: true},
+				{Path: secondary, Branch: "feat/a"},
+			},
+		},
+		statuses: map[string]git.Worktree{
+			primary:   {Path: primary, Branch: "main", DirtyFiles: 0, HasUpstream: true},
+			secondary: {Path: secondary, Branch: "feat/a", DirtyFiles: 2, HasUpstream: true},
+		},
+	}
+	a := newTestAggregator(t, Config{
+		Repos:          []Repo{{Root: repoRoot}},
+		SessionStore:   store,
+		listWorktrees:  fakes.listWorktrees,
+		worktreeStatus: fakes.worktreeStatus,
+		listProcs:      fakes.listProcs,
+		now:            func() time.Time { return now },
+	})
+	got, err := a.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	byPath := map[string]WorktreeState{}
+	for _, s := range got {
+		byPath[s.Worktree.Path] = s
+	}
+	if !byPath[primary].Worktree.Main {
+		t.Errorf("primary Worktree.Main = false after status merge; want true (Main must survive like Bare does)")
+	}
+	if byPath[secondary].Worktree.Main {
+		t.Errorf("secondary Worktree.Main = true; want false (only the first ListWorktrees record is primary)")
+	}
+}
+
 func TestWorktreeStatesEqual_DiffDetection(t *testing.T) {
 	base := WorktreeState{
 		Repo:     Repo{Root: "/r", Name: "r"},

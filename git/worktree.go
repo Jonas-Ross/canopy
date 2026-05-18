@@ -17,12 +17,13 @@ import (
 
 // Worktree is the per-worktree state surfaced by this package.
 // ListWorktrees populates the identity fields only (Path, Branch, Bare,
-// Detached). The status fields are filled in by WorktreeStatus.
+// Detached, Main). The status fields are filled in by WorktreeStatus.
 type Worktree struct {
 	Path        string
 	Branch      string // empty when Detached
 	Bare        bool
 	Detached    bool
+	Main        bool // primary worktree — first record in `git worktree list --porcelain`
 	DirtyFiles  int
 	Ahead       int
 	Behind      int
@@ -205,7 +206,9 @@ func readLastCommit(ctx context.Context, path string) (Commit, error) {
 // Format: records separated by a blank line. Each record carries at
 // least a `worktree <path>` line; optional lines are `HEAD <sha>`,
 // `branch refs/heads/<name>`, plus single-token markers `bare` and
-// `detached`. The main worktree may be bare and have no HEAD/branch.
+// `detached`. The main worktree may be bare and have no HEAD/branch,
+// and is always reported first — that ordering is the porcelain
+// contract we rely on to set Main=true on the primary worktree.
 func parseWorktreeList(out []byte) []Worktree {
 	var result []Worktree
 	var cur Worktree
@@ -213,6 +216,9 @@ func parseWorktreeList(out []byte) []Worktree {
 
 	flush := func() {
 		if inRecord && cur.Path != "" {
+			if len(result) == 0 {
+				cur.Main = true
+			}
 			result = append(result, cur)
 		}
 		cur = Worktree{}

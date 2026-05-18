@@ -142,8 +142,10 @@ func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree,
 	}
 
 	if full, err := a.cfg.worktreeStatus(ctx, wt.Path); err == nil {
-		// WorktreeStatus does not surface the bare flag.
+		// WorktreeStatus does not surface the identity flags that
+		// ListWorktrees sets from porcelain output.
 		full.Bare = wt.Bare
+		full.Main = wt.Main
 		state.Worktree = full
 	}
 
