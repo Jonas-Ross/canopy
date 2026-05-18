@@ -2,6 +2,8 @@
 
 A personal Go TUI (bubbletea + lipgloss) that fuses a worktree-aware git command center with Claude Code session forensics, for Jonas.
 
+`AGENTS.md` is a symlink to this file — agents that look for either will find the same content.
+
 ## Read before changing anything
 
 - `docs/handoff.md` — vision, architecture, design decisions, non-goals. Source of truth. Read it before any non-trivial change; do not duplicate it here.
@@ -34,6 +36,18 @@ CI: `.github/workflows/ci.yml` runs `go vet`, `go build`, and `go test -race -co
 - After committing and before opening a PR, run the `/simplify` skill over the diff to catch reuse opportunities and quality issues; address what it surfaces.
 - Pushing feature branches and opening PRs is part of the normal flow — no per-action confirmation needed. Never push directly to `main`, never force-push, never merge without explicit ask.
 - Do not amend committed work; create a new commit.
+
+## Testing
+
+Tests are the merge gate, especially for TUI work. **`docs/validation.md` is the source of truth — read it before touching `tui/` or `cmd/demo*`.** Don't duplicate that doc here; the rules below are reminders.
+
+- **The three-tier loop, cheapest first:**
+  1. `go test ./... -race` — golden frames catch layout/glyph/reflow regressions. <1s, CI-gated.
+  2. `canopy demo --script=tui/testdata/scripts/<scenario>.txt` — exercises the full `cmd/root.go`-shaped pipeline against a sandbox. Catches wiring bugs goldens can't see.
+  3. `canopy demo --script=… --capture-png=…` — pipes ANSI through `freeze` for visual checks (colour, bold, glyph vs solid block). Requires `freeze` on PATH.
+- **When a golden changes:** read the diff, decide if it's intentional, then `go test ./tui -update` to re-bake and `git diff tui/testdata/golden/` to eyeball the new frames before committing.
+- **Don't skip the demo loop on TUI changes.** Goldens prove the strings render; the demo script proves the pipeline wired them. Both, not either.
+- **Don't loosen tests to make CI green.** If a test fails, it's telling you something. Fix the code, or update the golden when the change is intentional and reviewed.
 
 ## Architecture
 
@@ -85,6 +99,6 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 
 ## Status
 
-v0.4. Operational TUI lands in PR #15: `sessions`, `git`, `procs`, `pr`, `aggregator`, `tui`, and `cmd/demo` all in place. The validation loop (`go test ./tui` goldens + `canopy demo` scripted replays + optional `--capture-png` via `freeze`) is the merge gate for further TUI work — see `docs/validation.md`. Active milestone: **M4 → M5** transition.
+v0.4. Operational TUI shipped in PR #15 (with follow-up polish in #28–30): `sessions`, `git`, `procs`, `pr`, `aggregator`, `tui`, and `cmd/demo` all in place. The validation loop (`go test ./tui` goldens + `canopy demo` scripted replays + optional `--capture-png` via `freeze`) is the merge gate for further TUI work — see `docs/validation.md`. Active milestone: **M4 → M5** transition.
 
 Build order: M0 → M1 (`sessions`) → M2 (`git`, `procs`, `pr`, parallelizable) → M3 (`aggregator`) → M4 (TUI operational view, **self-validating via the demo loop**) → M5 (subcommand stubs) → M6 (verification). Critical path is M0 → M1 → M3 → M4.
