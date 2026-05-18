@@ -152,7 +152,13 @@ func (m Model) handleShellDrop() (Model, tea.Cmd) {
 }
 
 func (m Model) startPrune() (Model, tea.Cmd) {
-	if _, ok := m.focusedState(); !ok {
+	state, ok := m.focusedState()
+	if !ok {
+		return m, nil
+	}
+	// git refuses `worktree remove` on the primary worktree; surface a notice instead of a no-op prompt.
+	if state.Worktree.Main {
+		m.notice = noticeStyle.Render("cannot prune primary worktree")
 		return m, nil
 	}
 	m.mode = modeConfirmPrune

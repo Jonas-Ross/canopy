@@ -98,7 +98,7 @@ func TestListWorktrees_ParsesPorcelain(t *testing.T) {
 		t.Fatalf("ListWorktrees: %v", err)
 	}
 	want := []Worktree{
-		{Path: "/repo/main", Branch: "main"},
+		{Path: "/repo/main", Branch: "main", Main: true},
 		{Path: "/repo/bare-mirror", Bare: true},
 		{Path: "/repo/detached", Detached: true},
 	}
@@ -124,7 +124,7 @@ func TestListWorktrees_EmptyRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWorktrees: %v", err)
 	}
-	want := []Worktree{{Path: "/repo/only", Branch: "main"}}
+	want := []Worktree{{Path: "/repo/only", Branch: "main", Main: true}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ListWorktrees: got %+v want %+v", got, want)
 	}
@@ -368,7 +368,7 @@ func TestParseWorktreeList_TrailingCRLFTolerant(t *testing.T) {
 	// so paths and refs don't pick up the carriage return.
 	fixture := "worktree /repo/main\r\nbranch refs/heads/main\r\n\r\n"
 	got := parseWorktreeList([]byte(fixture))
-	want := []Worktree{{Path: "/repo/main", Branch: "main"}}
+	want := []Worktree{{Path: "/repo/main", Branch: "main", Main: true}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v want %+v", got, want)
 	}
