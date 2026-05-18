@@ -490,7 +490,7 @@ func (m Model) renderFooter(width int) string {
 
 	var chunks []string
 	for _, b := range footerKeys {
-		if hidePrune && b.key == "d" {
+		if hidePrune && b.key == string(keyPrune) {
 			continue
 		}
 		chunks = append(chunks, keyStyle.Render(b.key)+" "+keyDescStyle.Render(b.desc))

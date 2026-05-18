@@ -69,8 +69,6 @@ var (
 	keyStyle     = lipgloss.NewStyle().Foreground(colFG).Bold(true)
 	keyDescStyle = lipgloss.NewStyle().Foreground(colDim)
 	dimStyle     = lipgloss.NewStyle().Foreground(colDim)
-
-	primaryMarkerStyle = lipgloss.NewStyle().Foreground(colDim)
 )
 
 // Per-column width wrappers hoisted to package scope so repaints don't
