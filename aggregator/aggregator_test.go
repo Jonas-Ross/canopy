@@ -429,6 +429,178 @@ func TestSnapshot_NestedCwdMatchesCorrectly(t *testing.T) {
 	}
 }
 
+// writeJSONLSessionMultiCwd writes a JSONL session with two cwds (first and
+// last conversation lines). Used to exercise the case where a Claude session
+// starts in /repo and later moves into /repo/.worktrees/feat.
+func writeJSONLSessionMultiCwd(t *testing.T, root, projectDirName, sessionID, firstCwd, lastCwd string, updatedAt time.Time) string {
+	t.Helper()
+	dir := filepath.Join(root, projectDirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	path := filepath.Join(dir, sessionID+".jsonl")
+	first := updatedAt.Add(-30 * time.Second).UTC().Format(time.RFC3339)
+	last := updatedAt.UTC().Format(time.RFC3339)
+	line := func(uid, ts, cwd string) string {
+		return fmt.Sprintf(
+			`{"type":"user","uuid":%q,"parentUuid":null,"sessionId":%q,"timestamp":%q,"cwd":%q,"gitBranch":"main","version":"2.1.143","message":{"role":"user","content":"hello"}}`+"\n",
+			uid, sessionID, ts, cwd,
+		)
+	}
+	content := line("u-1-"+sessionID, first, firstCwd) + line("u-2-"+sessionID, last, lastCwd)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	if err := os.Chtimes(path, updatedAt, updatedAt); err != nil {
+		t.Fatalf("chtimes %s: %v", path, err)
+	}
+	return path
+}
+
+// TestSnapshot_SessionMovedIntoNestedWorktreeOnlyAttributesToLast pins the
+// fix for the user-visible bug where a Claude session that started in /repo
+// and later moved into /repo/.worktrees/feat was being attributed to BOTH
+// worktrees. The session belongs only to its most-recent cwd's worktree.
+func TestSnapshot_SessionMovedIntoNestedWorktreeOnlyAttributesToLast(t *testing.T) {
+	now := fixedNow()
+	repoRoot := "/repo"
+	mainWT := "/repo"
+	nestedWT := "/repo/.worktrees/feat"
+
+	store := openTestSessionStore(t, func(root string) {
+		// Session started in /repo, later moved into the nested worktree.
+		writeJSONLSessionMultiCwd(t, root, "moved", "00000000-0000-0000-0000-000000000099",
+			mainWT, nestedWT, now.Add(-10*time.Second))
+	})
+
+	fakes := &fakeSources{
+		worktrees: map[string][]git.Worktree{
+			repoRoot: {
+				{Path: mainWT, Branch: "main"},
+				{Path: nestedWT, Branch: "feat"},
+			},
+		},
+	}
+	a := newTestAggregator(t, Config{
+		Repos:          []Repo{{Root: repoRoot}},
+		SessionStore:   store,
+		listWorktrees:  fakes.listWorktrees,
+		worktreeStatus: fakes.worktreeStatus,
+		listProcs:      fakes.listProcs,
+		now:            func() time.Time { return now },
+	})
+	got, err := a.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	byPath := map[string]WorktreeState{}
+	for _, s := range got {
+		byPath[s.Worktree.Path] = s
+	}
+
+	if byPath[mainWT].Live != nil {
+		t.Errorf("main worktree Live=%+v; want nil (session's last cwd is nested)", byPath[mainWT].Live)
+	}
+	if len(byPath[mainWT].Recent) != 0 {
+		t.Errorf("main worktree Recent=%+v; want empty (session's last cwd is nested)", byPath[mainWT].Recent)
+	}
+	if byPath[nestedWT].Live == nil {
+		t.Errorf("nested worktree Live=nil; want the moved session")
+	}
+}
+
+// TestSnapshot_NestedWorktreeSessionsAttributeToDeepest pins the fix for
+// the canopy bug where a worktree at /repo/.worktrees/feat (whose path is
+// nested inside the main worktree at /repo) caused its session to also
+// appear under /repo via pure-string prefix matching. The deepest matching
+// worktree must win.
+func TestSnapshot_NestedWorktreeSessionsAttributeToDeepest(t *testing.T) {
+	now := fixedNow()
+	repoRoot := "/repo"
+	mainWT := "/repo"
+	nestedWT := "/repo/.worktrees/feat"
+
+	store := openTestSessionStore(t, func(root string) {
+		// Live session in the nested worktree — must NOT also show on /repo.
+		writeJSONLSession(t, root, "nested", "00000000-0000-0000-0000-000000000001", nestedWT, now.Add(-10*time.Second))
+		// Another older session strictly in /repo (cwd is the main worktree
+		// itself, no .worktrees/ subpath) — this one should land on /repo.
+		writeJSONLSession(t, root, "main", "00000000-0000-0000-0000-000000000002", mainWT, now.Add(-2*time.Hour))
+	})
+
+	fakes := &fakeSources{
+		worktrees: map[string][]git.Worktree{
+			repoRoot: {
+				{Path: mainWT, Branch: "main"},
+				{Path: nestedWT, Branch: "feat"},
+			},
+		},
+		procs: map[string][]procs.Process{
+			// `listProcs(prefix)` is called once per worktree. The /repo query
+			// returns both processes (string prefix); the /repo/.worktrees/feat
+			// query returns only the nested one. Aggregator must filter the
+			// /repo result so the nested proc lands only on the nested worktree.
+			mainWT:   {{Pid: 100, Cwd: mainWT, Command: "shell"}, {Pid: 200, Cwd: nestedWT, Command: "claude"}},
+			nestedWT: {{Pid: 200, Cwd: nestedWT, Command: "claude"}},
+		},
+	}
+	a := newTestAggregator(t, Config{
+		Repos:          []Repo{{Root: repoRoot}},
+		SessionStore:   store,
+		listWorktrees:  fakes.listWorktrees,
+		worktreeStatus: fakes.worktreeStatus,
+		listProcs:      fakes.listProcs,
+		now:            func() time.Time { return now },
+	})
+	got, err := a.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	byPath := map[string]WorktreeState{}
+	for _, s := range got {
+		byPath[s.Worktree.Path] = s
+	}
+
+	if !containsSessionByCwd(byPath[nestedWT].Recent, nestedWT) {
+		t.Errorf("nested worktree missing its own session; got %+v", byPath[nestedWT].Recent)
+	}
+	if containsSessionByCwd(byPath[mainWT].Recent, nestedWT) {
+		t.Errorf("main worktree incorrectly attributed nested-worktree session; got %+v", byPath[mainWT].Recent)
+	}
+	if !containsSessionByCwd(byPath[mainWT].Recent, mainWT) {
+		t.Errorf("main worktree missing its own (cwd==/repo) session; got %+v", byPath[mainWT].Recent)
+	}
+
+	if byPath[nestedWT].Live == nil {
+		t.Errorf("nested worktree Live=nil; want the live nested session")
+	}
+	if byPath[mainWT].Live != nil {
+		t.Errorf("main worktree Live=%+v; want nil (its only session is 2h old)", byPath[mainWT].Live)
+	}
+
+	// Procs: only pid 100 (shell, cwd=/repo) should land on main. Pid 200
+	// (claude, cwd=/repo/.worktrees/feat) belongs to the nested worktree.
+	hasPid := func(ps []procs.Process, pid int) bool {
+		for _, p := range ps {
+			if p.Pid == pid {
+				return true
+			}
+		}
+		return false
+	}
+	if hasPid(byPath[mainWT].Procs, 200) {
+		t.Errorf("main worktree incorrectly attributed nested-worktree process (pid 200); got %+v", byPath[mainWT].Procs)
+	}
+	if !hasPid(byPath[mainWT].Procs, 100) {
+		t.Errorf("main worktree missing its own process (pid 100); got %+v", byPath[mainWT].Procs)
+	}
+	if !hasPid(byPath[nestedWT].Procs, 200) {
+		t.Errorf("nested worktree missing its claude process (pid 200); got %+v", byPath[nestedWT].Procs)
+	}
+}
+
 func containsSessionByCwd(sess []*sessions.Session, cwd string) bool {
 	for _, s := range sess {
 		for _, c := range s.Cwds {

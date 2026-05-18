@@ -109,10 +109,10 @@ func (a *Aggregator) refreshAll(
 	broadcast bool,
 ) {
 	seen := make(map[string]struct{})
-	_ = a.walkAll(ctx, func(repo Repo, wt git.Worktree, prs []pr.PR, prStale bool) {
+	_ = a.walkAll(ctx, func(repo Repo, wt git.Worktree, siblings []string, prs []pr.PR, prStale bool) {
 		seen[wt.Path] = struct{}{}
 		pathToRepo[wt.Path] = repo
-		next := a.buildState(ctx, repo, wt, prs, prStale)
+		next := a.buildState(ctx, repo, wt, siblings, prs, prStale)
 		prev, had := state[wt.Path]
 		state[wt.Path] = next
 		if broadcast && (!had || !worktreeStatesEqual(prev, next)) {
@@ -152,7 +152,8 @@ func (a *Aggregator) refreshOne(
 		return
 	}
 	prList, prStale := a.fetchPRs(ctx, repo.Root)
-	next := a.buildState(ctx, repo, full, prList, prStale)
+	siblings := siblingPaths(pathToRepo, repo)
+	next := a.buildState(ctx, repo, full, siblings, prList, prStale)
 	prev, had := state[path]
 	state[path] = next
 	if !had || !worktreeStatesEqual(prev, next) {
@@ -199,4 +200,37 @@ func matchWorktreeForCwd(cwd string, state map[string]WorktreeState) string {
 		}
 	}
 	return bestPath
+}
+
+// longestMatchingPath returns the longest path in paths that is a path-aware
+// prefix of cwd, or "" if no path matches. Used to attribute a session or
+// process to the deepest containing worktree when worktrees are nested.
+func longestMatchingPath(cwd string, paths []string) string {
+	if cwd == "" {
+		return ""
+	}
+	bestPath := ""
+	bestLen := 0
+	for _, p := range paths {
+		if !pathHasPrefix(cwd, p) {
+			continue
+		}
+		if len(p) > bestLen {
+			bestPath = p
+			bestLen = len(p)
+		}
+	}
+	return bestPath
+}
+
+// siblingPaths returns every worktree path tracked under repo. Used by
+// refreshOne when it lacks the walkAll-derived siblings list.
+func siblingPaths(pathToRepo map[string]Repo, repo Repo) []string {
+	out := make([]string, 0, len(pathToRepo))
+	for p, r := range pathToRepo {
+		if r.Root == repo.Root {
+			out = append(out, p)
+		}
+	}
+	return out
 }
