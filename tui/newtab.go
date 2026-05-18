@@ -2,7 +2,6 @@ package tui
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -112,23 +111,25 @@ end tell`
 }
 
 func spawnLinuxTab(dir string) error {
-	for _, attempt := range []*exec.Cmd{
+	// This is the last-resort fallback (we only get here when neither $TMUX
+	// nor $TERM_PROGRAM identified the host). Try every candidate and only
+	// give up once they've all failed — `wezterm cli spawn` returns a
+	// connection error (not ErrNotFound) when wezterm is installed but no
+	// GUI/mux is running, and the user is almost certainly in a different
+	// terminal in that case.
+	var lastErr error
+	for _, cand := range []*exec.Cmd{
 		exec.Command("wezterm", "cli", "spawn", "--cwd", dir),
 		exec.Command("gnome-terminal", "--tab", "--working-directory="+dir),
 		exec.Command("konsole", "--new-tab", "--workdir", dir),
 	} {
-		err := runCapturingStderr(attempt)
+		err := runCapturingStderr(cand)
 		if err == nil {
 			return nil
 		}
-		// Only fall through to the next candidate when the binary itself is
-		// absent. A real failure (e.g. wezterm running but no GUI server)
-		// is the user's actual problem and should surface.
-		if !errors.Is(err, exec.ErrNotFound) {
-			return err
-		}
+		lastErr = err
 	}
-	return fmt.Errorf("no supported linux terminal found (need wezterm, gnome-terminal, or konsole)")
+	return fmt.Errorf("no supported linux terminal succeeded (last error: %w)", lastErr)
 }
 
 func runCapturingStderr(c *exec.Cmd) error {
