@@ -131,6 +131,84 @@ func TestRefresh_EmitsUpdateWhenStateChanges(t *testing.T) {
 	}
 }
 
+// Regression: refreshOne (cmdRefreshByCwd / cmdRefreshWorktree) is the
+// fsnotify- and tail-driven path. It calls WorktreeStatus directly, which
+// does not populate the identity flags set by ListWorktrees (Main, Bare).
+// Without restoring them, the next Update drops Main on the primary
+// worktree, which re-arms the TUI's prune prompt on `d` — exactly the
+// PR #28 bug, just via a different code path.
+func TestRefreshByCwd_PreservesMainOnPrimary(t *testing.T) {
+	repo := "/repo"
+	primary := "/repo"
+	secondary := "/repo/wt-a"
+
+	store := openTestSessionStore(t, func(root string) {})
+	fakes := &fakeSources{
+		worktrees: map[string][]git.Worktree{
+			repo: {
+				{Path: primary, Branch: "main", Main: true},
+				{Path: secondary, Branch: "feat/a"},
+			},
+		},
+		statuses: map[string]git.Worktree{
+			primary:   {Path: primary, Branch: "main", DirtyFiles: 0, HasUpstream: true},
+			secondary: {Path: secondary, Branch: "feat/a", DirtyFiles: 0, HasUpstream: true},
+		},
+	}
+	now := fixedNow()
+	a := newTestAggregator(t, Config{
+		Repos:          []Repo{{Root: repo, Name: "repo"}},
+		SessionStore:   store,
+		listWorktrees:  fakes.listWorktrees,
+		worktreeStatus: fakes.worktreeStatus,
+		listProcs:      fakes.listProcs,
+		now:            func() time.Time { return now },
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := a.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Close()
+
+	sub := a.Subscribe(context.Background())
+	baseline := drain(t, sub, 2, time.Second)
+	if len(baseline) != 2 {
+		t.Fatalf("baseline updates: got %d, want 2", len(baseline))
+	}
+	for _, u := range baseline {
+		if u.Worktree == primary && !u.State.Worktree.Main {
+			t.Fatalf("baseline primary Main=false; refreshAll path itself is broken")
+		}
+	}
+
+	// Mutate so the refreshOne path emits a new update (otherwise the
+	// state-equality short-circuit swallows it and we can't observe the
+	// new Main value).
+	fakes.mu.Lock()
+	fakes.statuses[primary] = git.Worktree{Path: primary, Branch: "main", DirtyFiles: 3, HasUpstream: true}
+	fakes.mu.Unlock()
+
+	// cmdRefreshByCwd is what fsnotify and the tail consumer send; route
+	// through the same channel the production callers use.
+	a.cmds <- command{kind: cmdRefreshByCwd, cwd: primary}
+
+	got := drain(t, sub, 1, time.Second)
+	if len(got) != 1 {
+		t.Fatalf("after cmdRefreshByCwd: got %d updates, want 1", len(got))
+	}
+	if got[0].Worktree != primary {
+		t.Fatalf("update path=%q, want %q", got[0].Worktree, primary)
+	}
+	if got[0].State.Worktree.DirtyFiles != 3 {
+		t.Errorf("DirtyFiles=%d, want 3 (mutation should propagate)", got[0].State.Worktree.DirtyFiles)
+	}
+	if !got[0].State.Worktree.Main {
+		t.Errorf("primary Worktree.Main = false after refreshOne; want true — identity flags must survive the WorktreeStatus merge on the live-refresh path, not just Snapshot")
+	}
+}
+
 func TestRefresh_NoEmitWhenStateUnchanged(t *testing.T) {
 	fx := newLiveFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
