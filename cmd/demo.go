@@ -15,6 +15,7 @@ import (
 	"github.com/jonasross/canopy/aggregator"
 	"github.com/jonasross/canopy/internal/demo"
 	"github.com/jonasross/canopy/pr"
+	"github.com/jonasross/canopy/procs"
 	"github.com/jonasross/canopy/sessions"
 	"github.com/jonasross/canopy/tui"
 )
@@ -74,6 +75,14 @@ sandbox.`,
 			return "/usr/bin/" + name, nil
 		})
 		defer pr.SetLookPath(restoreLook)
+
+		procsList := demo.HeavyProcs(fix.WorktreePath(demo.BranchAuth))
+		restoreProcs := procs.SetEnumerator(func(_ context.Context) ([]procs.Process, error) {
+			out := make([]procs.Process, len(procsList))
+			copy(out, procsList)
+			return out, nil
+		})
+		defer restoreProcs()
 
 		store, err := sessions.Open(fix.SessionsRoot)
 		if err != nil {

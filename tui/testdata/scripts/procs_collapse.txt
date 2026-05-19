@@ -1,0 +1,36 @@
+# Procs panel collapse/expand flow.
+#
+# Walks the cursor onto feat/auth (the worktree with the heavy fixture
+# proc list), captures the collapsed view, presses P to expand, captures
+# the expanded view, presses P again to collapse, and captures once more.
+#
+# What this catches:
+#   - collapsed.txt must show ranked top 5 + "+9 more (P)" hint
+#   - expanded.txt must show every proc, no "more" line
+#   - recollapsed.txt must match collapsed.txt
+
+width 140
+height 40
+
+# Let initial aggregator snapshots settle.
+resolve
+wait 200ms
+
+# Focus feat/auth (the heavy-procs worktree). Two j moves down from the
+# default first row; demo fixture ordering is stable across runs.
+keys jj
+resolve
+
+capture /tmp/canopy_procs_collapsed.txt
+
+# Expand.
+keys P
+resolve
+
+capture /tmp/canopy_procs_expanded.txt
+
+# Collapse again.
+keys P
+resolve
+
+capture /tmp/canopy_procs_recollapsed.txt

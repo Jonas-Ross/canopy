@@ -46,7 +46,7 @@ func elidePath(path string, max int) string {
 	return "…" + string(runes[len(runes)-(max-1):])
 }
 
-func renderDetailPane(state aggregator.WorktreeState, now time.Time, height int) string {
+func renderDetailPane(state aggregator.WorktreeState, now time.Time, height int, procsExpanded bool) string {
 	if state.Worktree.Path == "" {
 		return ""
 	}
@@ -74,7 +74,7 @@ func renderDetailPane(state aggregator.WorktreeState, now time.Time, height int)
 			procsBudget = 1
 		}
 	}
-	procsSec := renderDetailProcs(state.Procs, procsBudget)
+	procsSec := renderDetailProcs(state.Procs, procsBudget, procsExpanded)
 
 	sections := make([]string, 0, 4)
 	sections = append(sections, top)
@@ -150,33 +150,46 @@ func renderDetailPR(state aggregator.WorktreeState) string {
 	return sb.String()
 }
 
-// renderDetailProcs caps the section so its visible rows fit `budget` (header
-// + procs + optional "+N more"). budget <= 0 means unbounded.
-func renderDetailProcs(list []procs.Process, budget int) string {
+// procsCollapsedCap is the soft cap on visible proc rows when collapsed.
+// Height budget may force a tighter clamp; expanded view ignores this cap.
+const procsCollapsedCap = 5
+
+// renderDetailProcs returns the Processes section. budget <= 0 means
+// unbounded. When budget caps the list, one row is reserved for the
+// "+N more (P)" hint.
+func renderDetailProcs(list []procs.Process, budget int, expanded bool) string {
 	if len(list) == 0 {
 		return ""
 	}
-	var sb strings.Builder
-	sb.Grow(64 + 32*len(list))
-	sb.WriteString(detailHeaderStyle.Render("Processes"))
+	ranked := rankProcs(list)
+	total := len(ranked)
 
-	show := len(list)
-	hidden := 0
+	show := total
+	if !expanded && show > procsCollapsedCap {
+		show = procsCollapsedCap
+	}
 	if budget > 0 {
 		maxRows := budget - 1 // header takes one row
 		if maxRows < 0 {
 			maxRows = 0
 		}
 		if show > maxRows {
-			show = maxRows - 1 // reserve one row for "+N more"
+			show = maxRows
+		}
+		if show < total && show >= maxRows {
+			show = maxRows - 1
 			if show < 0 {
 				show = 0
 			}
-			hidden = len(list) - show
 		}
 	}
+	hidden := total - show
+
+	var sb strings.Builder
+	sb.Grow(64 + 32*show)
+	sb.WriteString(detailHeaderStyle.Render("Processes"))
 	for i := 0; i < show; i++ {
-		p := list[i]
+		p := ranked[i]
 		sb.WriteByte('\n')
 		line := fmt.Sprintf("%-7d %s", p.Pid, truncate(p.Command, detailContentW-8))
 		if isClaudeProc(p.Command, p.Args) {
@@ -188,7 +201,7 @@ func renderDetailProcs(list []procs.Process, budget int) string {
 	}
 	if hidden > 0 {
 		sb.WriteByte('\n')
-		sb.WriteString(detailLabelStyle.Render(fmt.Sprintf("+%d more", hidden)))
+		sb.WriteString(detailLabelStyle.Render(fmt.Sprintf("+%d more (P)", hidden)))
 	}
 	return sb.String()
 }

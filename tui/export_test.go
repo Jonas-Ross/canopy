@@ -89,3 +89,12 @@ func CreateWorktreeCmdForTest(repoRoot, branch, base string) tea.Cmd {
 // ValidBranchOrBaseName exposes the unexported validator for direct table
 // testing.
 func ValidBranchOrBaseName(s string) bool { return validBranchOrBaseName(s) }
+
+// ProcsExpandedFor reports whether the procs section is expanded for the
+// given worktree path on this Model. Returns false on a type-assertion miss.
+func ProcsExpandedFor(m tea.Model, path string) bool {
+	if mm, ok := m.(Model); ok {
+		return mm.procsExpanded[path]
+	}
+	return false
+}
