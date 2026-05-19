@@ -113,6 +113,41 @@ func TestHydrate_Meta_ZeroWhenAbsent(t *testing.T) {
 	}
 }
 
+// hydrateMetaLegacyFixture exercises the older field-name shape still
+// present in sessions/testdata/{projects,events}/* fixtures: `mode`,
+// `title`, `prompt` instead of `permissionMode`, `aiTitle`, `lastPrompt`.
+// Real on-disk sessions from earlier CLI versions plausibly use it too.
+const hydrateMetaLegacyFixture = `{"type":"user","uuid":"u-1","parentUuid":null,"sessionId":"hydrate-meta-legacy","timestamp":"2026-05-15T10:00:00.000Z","cwd":"/work/L","gitBranch":"main","version":"2.1.143","message":{"role":"user","content":"hi"}}
+{"type":"assistant","uuid":"a-1","parentUuid":"u-1","sessionId":"hydrate-meta-legacy","timestamp":"2026-05-15T10:00:01.000Z","cwd":"/work/L","gitBranch":"main","version":"2.1.143","message":{"id":"msg_x","role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"reply"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"requestId":"req_x"}
+{"type":"permission-mode","sessionId":"hydrate-meta-legacy","cwd":"/work/L","mode":"plan"}
+{"type":"ai-title","sessionId":"hydrate-meta-legacy","cwd":"/work/L","title":"Legacy AI title"}
+{"type":"custom-title","sessionId":"hydrate-meta-legacy","cwd":"/work/L","title":"legacy-custom"}
+{"type":"last-prompt","sessionId":"hydrate-meta-legacy","cwd":"/work/L","prompt":"legacy prompt"}
+`
+
+func TestHydrate_Meta_LegacyFieldShape(t *testing.T) {
+	root, id, _ := writeHydrateFixture(t, "-work-L", "hydrate-meta-legacy", hydrateMetaLegacyFixture)
+	store := openWith(t, root)
+
+	sess, err := store.Session(id)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if err := store.Hydrate(sess); err != nil {
+		t.Fatalf("Hydrate: %v", err)
+	}
+
+	want := SessionMeta{
+		LastPrompt:     "legacy prompt",
+		AITitle:        "Legacy AI title",
+		CustomTitle:    "legacy-custom",
+		PermissionMode: "plan",
+	}
+	if !reflect.DeepEqual(sess.Meta, want) {
+		t.Errorf("Meta=%+v\nwant   %+v", sess.Meta, want)
+	}
+}
+
 func TestHydrate_Meta_EventsContractUnchanged(t *testing.T) {
 	// Events() must still hide every meta line. Sanity-check this on
 	// the meta fixture by confirming Events surfaces exactly the two

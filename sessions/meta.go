@@ -2,9 +2,16 @@ package sessions
 
 import "encoding/json"
 
-// rawMetaLine is the union projection of any JSONL meta line. Field
-// tags match production schema sampled from ~/.claude/projects.
-// Per-type fields stay at their zero value on lines of other types.
+// rawMetaLine is the union projection of any JSONL meta line. Tags
+// match production schema sampled from ~/.claude/projects. Per-type
+// fields stay at their zero value on lines of other types.
+//
+// The Legacy* fields cover an earlier CLI shape (still present in
+// sessions/testdata/{projects/-tmp-projects-meta,events/-tmp-projects-events}
+// and plausibly on disk for older sessions): `mode` instead of
+// `permissionMode`, `title` instead of `aiTitle`/`customTitle`,
+// `prompt` instead of `lastPrompt`. applyMetaLine prefers the
+// production name and falls back to the legacy one.
 type rawMetaLine struct {
 	Type            string             `json:"type"`
 	LastPrompt      string             `json:"lastPrompt"`
@@ -19,6 +26,10 @@ type rawMetaLine struct {
 	WorktreeSession rawWorktreeSession `json:"worktreeSession"`
 	Operation       string             `json:"operation"`
 	Content         string             `json:"content"`
+
+	LegacyMode   string `json:"mode"`
+	LegacyTitle  string `json:"title"`
+	LegacyPrompt string `json:"prompt"`
 }
 
 // rawWorktreeSession matches the inner worktreeSession object on
@@ -48,13 +59,13 @@ func applyMetaLine(line []byte, meta *SessionMeta) bool {
 	}
 	switch raw.Type {
 	case "last-prompt":
-		meta.LastPrompt = raw.LastPrompt
+		meta.LastPrompt = firstNonEmpty(raw.LastPrompt, raw.LegacyPrompt)
 	case "ai-title":
-		meta.AITitle = raw.AITitle
+		meta.AITitle = firstNonEmpty(raw.AITitle, raw.LegacyTitle)
 	case "custom-title":
-		meta.CustomTitle = raw.CustomTitle
+		meta.CustomTitle = firstNonEmpty(raw.CustomTitle, raw.LegacyTitle)
 	case "permission-mode":
-		meta.PermissionMode = raw.PermissionMode
+		meta.PermissionMode = firstNonEmpty(raw.PermissionMode, raw.LegacyMode)
 	case "agent-name":
 		meta.AgentName = raw.AgentName
 	case "agent-setting":
@@ -76,4 +87,11 @@ func applyMetaLine(line []byte, meta *SessionMeta) bool {
 		return false
 	}
 	return true
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
