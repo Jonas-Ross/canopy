@@ -359,6 +359,44 @@ func TestJsonStringField(t *testing.T) {
 	}
 }
 
+// TestScanFileMeta_NestedToolModelIgnored guards against a tool_use
+// input that carries its own "model" key (e.g. a wrapper tool taking a
+// model name as argument). Alphabetized output puts message.content
+// before message.model, so a naive first-occurrence scan would grab
+// the tool's model instead of the assistant's.
+func TestScanFileMeta_NestedToolModelIgnored(t *testing.T) {
+	body := joinLines(
+		`{"cwd":"/x","message":{"content":[{"type":"tool_use","name":"InvokeLLM","input":{"model":"tool-model-should-lose","prompt":"hi"}}],"id":"msg_01","model":"claude-opus-4-7","role":"assistant"},"sessionId":"s","timestamp":"2026-01-01T00:00:00.000Z","type":"assistant","uuid":"a1"}`,
+	)
+	got, err := scanFileMeta(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("scanFileMeta: %v", err)
+	}
+	if got.model != "claude-opus-4-7" {
+		t.Errorf("model = %q, want claude-opus-4-7 (nested tool model shadowed envelope?)", got.model)
+	}
+}
+
+// TestScanFileMeta_PartialLineRejected guards against bufio.Scanner
+// returning a trailing partial token when Open races a concurrent CLI
+// write. The old json.Unmarshal path rejected such lines via parse
+// error; the byte-extractor path must continue to do so.
+func TestScanFileMeta_PartialLineRejected(t *testing.T) {
+	// One complete conv line, then a partial conv line missing the
+	// closing brace (and most of the message body).
+	complete := `{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/complete","message":{"role":"user","content":"hi"}}`
+	partial := `{"type":"user","uuid":"u2","timestamp":"2026-01-01T00:00:01.000Z","cwd":"/partial","message":{"role":"user","content":"goodby`
+	body := complete + "\n" + partial // no trailing newline — Scanner emits partial as a final token
+
+	got, err := scanFileMeta(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("scanFileMeta: %v", err)
+	}
+	if got.firstCwd != "/complete" || got.lastCwd != "/complete" {
+		t.Errorf("cwds = (%q, %q), want both /complete (partial line accepted?)", got.firstCwd, got.lastCwd)
+	}
+}
+
 func joinLines(lines ...string) string {
 	return strings.Join(lines, "\n") + "\n"
 }

@@ -89,6 +89,12 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 		if len(line) == 0 {
 			continue
 		}
+		// A complete canonical JSONL line ends with '}'; a trailing
+		// partial token (Scanner emits one when EOF lands mid-line)
+		// does not. Reject it the way the old json.Unmarshal path did.
+		if line[len(line)-1] != '}' {
+			continue
+		}
 		isAssistant := bytes.Contains(line, typeTagAssistant)
 		isUser := !isAssistant && bytes.Contains(line, typeTagUser)
 		if !isUser && !isAssistant {
@@ -102,7 +108,7 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 		}
 
 		if m.model == "" && isAssistant {
-			if modelBytes, ok := jsonStringField(line, modelPat); ok && len(modelBytes) > 0 && !bytes.Equal(modelBytes, syntheticBytes) {
+			if modelBytes, ok := messageModelField(line); ok && len(modelBytes) > 0 && !bytes.Equal(modelBytes, syntheticBytes) {
 				m.model = string(modelBytes)
 			}
 		}
@@ -139,9 +145,9 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 // line. The result aliases line; copy it before the next Scanner fill.
 //
 // Does not honor JSON escape sequences inside the matched value. The
-// fields scanFileMeta extracts (uuid, timestamp, cwd, model) never
-// contain " or \ in CLI output. A new caller whose value can carry
-// embedded quotes must use a real JSON parse instead.
+// fields scanFileMeta extracts (uuid, timestamp, cwd) never contain "
+// or \ in CLI output. A new caller whose value can carry embedded
+// quotes must use a real JSON parse instead.
 func jsonStringField(line, pat []byte) ([]byte, bool) {
 	i := bytes.Index(line, pat)
 	if i < 0 {
@@ -153,6 +159,64 @@ func jsonStringField(line, pat []byte) ([]byte, bool) {
 		return nil, false
 	}
 	return line[start : start+j], true
+}
+
+// messageModelField returns the value of the "model" string at the top
+// level of the line's "message" object. A nested "model" key inside a
+// content block (e.g. an LLM-wrapper tool's input) is ignored — only
+// direct children of message match.
+func messageModelField(line []byte) ([]byte, bool) {
+	msgOpen := []byte(`"message":{`)
+	start := bytes.Index(line, msgOpen)
+	if start < 0 {
+		return nil, false
+	}
+	i := start + len(msgOpen)
+	n := len(line)
+	depth := 0
+	inString := false
+	for i < n {
+		c := line[i]
+		if inString {
+			if c == '\\' && i+1 < n {
+				i += 2
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			i++
+			continue
+		}
+		switch c {
+		case '"':
+			if depth == 0 && i+len(modelPat) <= n && bytes.Equal(line[i:i+len(modelPat)], modelPat) {
+				valStart := i + len(modelPat)
+				valEnd := valStart
+				for valEnd < n {
+					if line[valEnd] == '\\' && valEnd+1 < n {
+						valEnd += 2
+						continue
+					}
+					if line[valEnd] == '"' {
+						return line[valStart:valEnd], true
+					}
+					valEnd++
+				}
+				return nil, false
+			}
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			if depth == 0 {
+				return nil, false
+			}
+			depth--
+		}
+		i++
+	}
+	return nil, false
 }
 
 // parseTimestamp parses an RFC3339-with-millis timestamp as written by
