@@ -79,9 +79,8 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(*bufPtr, maxScanLineSize)
 
-	// Scratch buffers for first/last fields. Without these, every conv
-	// line would allocate a fresh string just to overwrite lastCwd on
-	// the next iteration.
+	// Byte scratch for first/last fields — avoids a string alloc per
+	// conv line just to overwrite lastCwd on the next iteration.
 	var firstCwdBuf, firstTimestampBuf, lastCwdBuf []byte
 	gotFirst := false
 

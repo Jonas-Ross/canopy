@@ -7,9 +7,6 @@ import (
 	"time"
 )
 
-// TestScanFileMeta_FirstAndLastCwd pins that cwd from the first and last
-// conversation events is what populates extractedMeta, and that meta /
-// side-band lines in between are ignored for cwd purposes.
 func TestScanFileMeta_FirstAndLastCwd(t *testing.T) {
 	body := joinLines(
 		`{"type":"queue-operation","operation":"enqueue","cwd":"/should/be/ignored"}`,
@@ -33,8 +30,6 @@ func TestScanFileMeta_FirstAndLastCwd(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_StartedAt pins that startedAt is taken from the FIRST
-// conversation event's timestamp (not last, not any meta line).
 func TestScanFileMeta_StartedAt(t *testing.T) {
 	body := joinLines(
 		`{"type":"user","uuid":"u1","timestamp":"2026-03-15T08:30:45.123Z","cwd":"/x","message":{"role":"user","content":"hi"}}`,
@@ -50,10 +45,6 @@ func TestScanFileMeta_StartedAt(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_ModelExtraction pins that:
-//   - the first non-"<synthetic>" assistant model wins,
-//   - synthetic models are skipped over until a real one is seen,
-//   - models on non-assistant lines are ignored.
 func TestScanFileMeta_ModelExtraction(t *testing.T) {
 	tests := []struct {
 		name string
@@ -107,13 +98,11 @@ func TestScanFileMeta_ModelExtraction(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_MetaLinesIgnored pins that lines without a uuid are
-// treated as non-conversation regardless of type and never affect the
-// first/last cwd or startedAt.
+// TestScanFileMeta_MetaLinesIgnored covers every meta type from
+// docs/jsonl-schema.md §3 (none have uuid). One conv line at the end
+// anchors the positive assertion.
 func TestScanFileMeta_MetaLinesIgnored(t *testing.T) {
 	body := joinLines(
-		// Every meta type from docs/jsonl-schema.md §3 (none have uuid)
-		// followed by one real conv line for the positive assertion.
 		`{"type":"permission-mode","mode":"acceptEdits"}`,
 		`{"type":"queue-operation","operation":"enqueue"}`,
 		`{"type":"ai-title","title":"foo"}`,
@@ -138,9 +127,6 @@ func TestScanFileMeta_MetaLinesIgnored(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_SidebandLinesSkipped pins that uuid-bearing lines
-// with side-band types (system, attachment, file-history-snapshot) are
-// NOT counted as conversation events even though they look conv-like.
 func TestScanFileMeta_SidebandLinesSkipped(t *testing.T) {
 	body := joinLines(
 		`{"type":"system","uuid":"s1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/not-conv"}`,
@@ -160,9 +146,6 @@ func TestScanFileMeta_SidebandLinesSkipped(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_MalformedToleratedAndConvFound pins that a malformed
-// JSON line doesn't poison the file: subsequent valid conv lines still
-// get indexed.
 func TestScanFileMeta_MalformedTolerated(t *testing.T) {
 	body := joinLines(
 		`{this is not json`,
@@ -185,8 +168,6 @@ func TestScanFileMeta_MalformedTolerated(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_EmptyFile pins that an empty reader returns a
-// zero-value extractedMeta with hasAnyConvLine=false and no error.
 func TestScanFileMeta_EmptyFile(t *testing.T) {
 	got, err := scanFileMeta(strings.NewReader(""))
 	if err != nil {
@@ -197,9 +178,6 @@ func TestScanFileMeta_EmptyFile(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_MetaOnlyFile pins that a file containing only meta /
-// side-band lines (no conv events) is treated as empty: no error,
-// hasAnyConvLine=false.
 func TestScanFileMeta_MetaOnlyFile(t *testing.T) {
 	body := joinLines(
 		`{"type":"queue-operation","operation":"enqueue"}`,
@@ -215,10 +193,7 @@ func TestScanFileMeta_MetaOnlyFile(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_VeryLargeLine pins that a multi-MB conv line is
-// consumed without error (Scanner.Buffer ceiling honored).
 func TestScanFileMeta_VeryLargeLine(t *testing.T) {
-	// 2 MB of filler inside the user message content.
 	filler := strings.Repeat("x", 2*1024*1024)
 	body := joinLines(
 		`{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/big","message":{"role":"user","content":"` + filler + `"}}`,
@@ -236,13 +211,9 @@ func TestScanFileMeta_VeryLargeLine(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_NonCanonicalKeyOrder pins that scanFileMeta still
-// extracts the right fields when keys appear in a non-canonical order
-// (uuid before type, etc.). This is the safety net for the byte
-// pre-filter optimization in Phase 2c — if the pre-filter is ever
-// tightened too aggressively, this test fails.
+// TestScanFileMeta_NonCanonicalKeyOrder is the safety net for the byte
+// pre-filter: if it ever tightens to require type-first, this fails.
 func TestScanFileMeta_NonCanonicalKeyOrder(t *testing.T) {
-	// Keys deliberately reordered: uuid, timestamp, cwd, type, message.
 	body := joinLines(
 		`{"uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/reorder","type":"user","message":{"role":"user","content":"hi"}}`,
 		`{"uuid":"a1","timestamp":"2026-01-01T00:00:01.000Z","cwd":"/reorder","type":"assistant","message":{"model":"claude-opus-4-7","content":[]}}`,
@@ -259,10 +230,9 @@ func TestScanFileMeta_NonCanonicalKeyOrder(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_PooledBufferNoCrossContamination pins that running
-// scanFileMeta twice in sequence over different inputs produces
-// independent results — i.e. that any future scanner-buffer pooling
-// does not leak bytes from one call into the next.
+// TestScanFileMeta_PooledBufferNoCrossContamination pins that the
+// sync.Pool'd scanner buffer doesn't leak bytes from one call into the
+// next.
 func TestScanFileMeta_PooledBufferNoCrossContamination(t *testing.T) {
 	bodyA := joinLines(
 		`{"type":"user","uuid":"uA","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/a","message":{"role":"user","content":"a"}}`,
@@ -287,12 +257,9 @@ func TestScanFileMeta_PooledBufferNoCrossContamination(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_ParentUuidDoesNotMaskUuid pins that the byte-level
-// uuid extractor doesn't accidentally pick up "parentUuid" as the
-// line's uuid. "parentUuid" precedes "uuid" alphabetically and the
-// canonical CLI output places it FIRST on most lines, so a naive
-// substring search for "uuid":" against a parentUuid'd line would
-// otherwise extract the parent's uuid.
+// TestScanFileMeta_ParentUuidDoesNotMaskUuid pins that "parentUuid"
+// (which appears first in canonical CLI output) doesn't shadow the
+// real top-level "uuid" in jsonStringField.
 func TestScanFileMeta_ParentUuidDoesNotMaskUuid(t *testing.T) {
 	body := joinLines(
 		`{"type":"user","parentUuid":"pppp-1111","uuid":"uuuu-2222","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/x","message":{"role":"user","content":"hi"}}`,
@@ -309,13 +276,10 @@ func TestScanFileMeta_ParentUuidDoesNotMaskUuid(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_AlphabetizedKeysWithNestedType pins that an
-// assistant line serialized by Go's json.Encoder (which alphabetizes
-// keys, so nested content-block `"type":"text"` literally precedes the
-// top-level `"type":"assistant"` in the byte stream) is still
-// classified as assistant and yields the model from the message
-// envelope. internal/demo's fixture uses json.Encoder, so this is the
-// shape that broke without the pre-filter-as-classifier rule.
+// TestScanFileMeta_AlphabetizedKeysWithNestedType covers the shape Go's
+// json.Encoder emits (alphabetized keys, so a nested content block's
+// `"type":"text"` precedes the top-level `"type":"assistant"`).
+// internal/demo writes fixtures this way.
 func TestScanFileMeta_AlphabetizedKeysWithNestedType(t *testing.T) {
 	body := joinLines(
 		`{"cwd":"/demo","message":{"content":[{"text":"hi","type":"text"}],"id":"msg_01","model":"claude-opus-4-7","role":"assistant"},"sessionId":"s","timestamp":"2026-01-01T00:00:00.000Z","type":"assistant","uuid":"a1"}`,
@@ -335,11 +299,10 @@ func TestScanFileMeta_AlphabetizedKeysWithNestedType(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_EscapedQuotesInContent pins that a tool-result whose
-// content payload contains the LITERAL bytes `"uuid":"..."` (after
-// JSON-encoding, those `"` become `\"`) doesn't trick the extractor
-// into reading a fake uuid. This is the safety net behind the "raw
-// `"key":"` only appears at top level in canonical JSON" assumption.
+// TestScanFileMeta_EscapedQuotesInContent is the safety net for the
+// "raw `"key":"` only appears at top level in canonical JSON"
+// assumption: a content payload that JSON-encodes `"uuid":"fake"`
+// (so its quotes become `\"`) must not shadow the real uuid.
 func TestScanFileMeta_EscapedQuotesInContent(t *testing.T) {
 	body := joinLines(
 		`{"type":"user","uuid":"real-uuid","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/correct","message":{"role":"user","content":"{\"uuid\":\"fake-uuid\",\"cwd\":\"/wrong\",\"type\":\"user\"}"}}`,
@@ -353,10 +316,6 @@ func TestScanFileMeta_EscapedQuotesInContent(t *testing.T) {
 	}
 }
 
-// TestScanFileMeta_EmptyCwdAllowed pins that an empty cwd value
-// (`"cwd":""`) is preserved as-is rather than crashing the extractor.
-// dedupeCwds downstream collapses this to nil; the field-level
-// extractor just needs to round-trip the value faithfully.
 func TestScanFileMeta_EmptyCwdAllowed(t *testing.T) {
 	body := joinLines(
 		`{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"","message":{"role":"user","content":"hi"}}`,
@@ -373,9 +332,6 @@ func TestScanFileMeta_EmptyCwdAllowed(t *testing.T) {
 	}
 }
 
-// TestJsonStringField directly exercises the byte extractor used by
-// scanFileMeta. Failures here narrow blame for any scanFileMeta
-// regression introduced by extractor edge cases.
 func TestJsonStringField(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -403,8 +359,6 @@ func TestJsonStringField(t *testing.T) {
 	}
 }
 
-// joinLines stitches JSONL test fixtures with newlines, leaving a final
-// newline so bufio.Scanner sees the last line cleanly.
 func joinLines(lines ...string) string {
 	return strings.Join(lines, "\n") + "\n"
 }
