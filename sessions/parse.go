@@ -12,23 +12,15 @@ import (
 	"time"
 )
 
-// maxScanLineSize is the buffer ceiling for bufio.Scanner. Some real
-// JSONL lines (attachments, large tool inputs/outputs) are multi-MB.
+// Some real JSONL lines (attachments, large tool inputs/outputs) are
+// multi-MB; this is the per-line ceiling for bufio.Scanner.
 const maxScanLineSize = 10 * 1024 * 1024
 
-// initScanBufSize is the starting capacity for each pooled Scanner
-// buffer. bufio.Scanner will grow past this when a single line exceeds
-// the current buffer, up to maxScanLineSize.
-const initScanBufSize = 64 * 1024
+const (
+	initScanBufSize    = 64 * 1024
+	retainedScanBufCap = 256 * 1024 // cap on what we keep in scanBufPool
+)
 
-// retainedScanBufCap caps the capacity we keep when returning a buffer
-// to scanBufPool. Without this, a single file with a multi-MB line would
-// permanently bloat every pooled buffer.
-const retainedScanBufCap = 256 * 1024
-
-// scanBufPool reuses bufio.Scanner backing arrays across scanFileMeta
-// calls. Without it, Open allocates a fresh 64 KB buffer per JSONL file
-// (532 × 64 KB ≈ 34 MB per Open on the user's tree).
 var scanBufPool = sync.Pool{
 	New: func() any {
 		b := make([]byte, 0, initScanBufSize)
@@ -36,39 +28,18 @@ var scanBufPool = sync.Pool{
 	},
 }
 
-// Canonical type-tag bytes used to short-circuit non-conversation lines
-// before any field-level scanning. Relies on the Claude CLI's canonical
-// JSON output (no whitespace, type-first). A non-canonical conv line
-// would be missed; covered by TestScanFileMeta_NonCanonicalKeyOrder
-// which exercises a line where "type" is NOT the first key.
+// Type detection uses the value-included typeTag* patterns, NOT
+// jsonStringField — content blocks have their own `"type":"text"` /
+// `"type":"tool_use"` keys that would shadow the top-level type once
+// json.Encoder alphabetizes the line.
 var (
 	typeTagUser      = []byte(`"type":"user"`)
 	typeTagAssistant = []byte(`"type":"assistant"`)
-)
-
-// Canonical field-search patterns for jsonStringField. Hoisted to
-// package scope so the byte slice itself is allocated once per process.
-//
-// Each field is uniquely scoped enough that bytes.Index returning the
-// first occurrence is the correct answer:
-//   - uuid, timestamp, cwd: only ever appear at the JSONL object's top
-//     level on conv lines (parentUuid has a different prefix; tool
-//     inputs do not embed these keys at depth ≥ 2 in canonical CLI
-//     output).
-//   - model: only appears inside the assistant message envelope, which
-//     is itself unique to assistant lines.
-//
-// Type detection deliberately does NOT use jsonStringField — content
-// blocks have their own `"type":"text"` / `"type":"tool_use"` keys, and
-// Go's json.Encoder alphabetizes keys (sorting `"type":"text"` inside
-// `content` before the top-level `"type":"assistant"`). Use the
-// value-included pre-filter patterns above instead.
-var (
-	uuidPat        = []byte(`"uuid":"`)
-	timestampPat   = []byte(`"timestamp":"`)
-	cwdPat         = []byte(`"cwd":"`)
-	modelPat       = []byte(`"model":"`)
-	syntheticBytes = []byte("<synthetic>")
+	uuidPat          = []byte(`"uuid":"`)
+	timestampPat     = []byte(`"timestamp":"`)
+	cwdPat           = []byte(`"cwd":"`)
+	modelPat         = []byte(`"model":"`)
+	syntheticBytes   = []byte("<synthetic>")
 )
 
 // extractedMeta is what the Open-time scan pulls out of one JSONL file.
@@ -82,19 +53,14 @@ type extractedMeta struct {
 
 // scanFileMeta walks a single JSONL file and extracts the first and
 // last conversation events' cwd + timestamp, plus the first non-
-// "<synthetic>" assistant model. It does not keep all lines in memory.
+// "<synthetic>" assistant model. Malformed lines and lines missing the
+// required fields are silently skipped; bufio.Scanner's ErrTooLong (a
+// line larger than maxScanLineSize) is the only failure surfaced.
 //
-// Malformed lines are tolerated: a line that lacks a required field is
-// skipped rather than aborting the file. Lines longer than
-// maxScanLineSize cause the scan to error out with the bufio sentinel;
-// callers wrap that with the file path.
-//
-// Hot path: no json.Unmarshal. Direct bytes.Index extraction is safe
-// here because the Claude CLI emits canonical JSON — interior " in any
-// nested string value is escaped to \", so the raw byte sequence
-// `"key":"` only appears at the object's top level (or inside the
-// message sub-object in the case of `"model":"`, which is uniquely
-// scoped to assistant envelopes per docs/jsonl-schema.md §3-4).
+// Hot-path extraction skips json.Unmarshal in favor of direct byte
+// scans. Safe because the CLI emits canonical JSON, so any `"key":"`
+// substring inside a nested string value is escape-rewritten as
+// `\"key\":\"` and cannot collide with the top-level keys we read.
 func scanFileMeta(r io.Reader) (extractedMeta, error) {
 	var m extractedMeta
 
@@ -102,8 +68,8 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 	defer func() {
 		buf := (*bufPtr)[:0]
 		if cap(buf) > retainedScanBufCap {
-			// Don't keep multi-MB buffers in the pool — a single
-			// outlier file would inflate every subsequent borrower.
+			// Outlier multi-MB file — drop the grown buffer so it doesn't
+			// inflate every subsequent borrower.
 			buf = make([]byte, 0, initScanBufSize)
 		}
 		*bufPtr = buf
@@ -113,29 +79,17 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(*bufPtr, maxScanLineSize)
 
-	// Hold first/last fields as byte slices in caller-owned scratch
-	// buffers. Without this, every conv line would allocate a string
-	// just to overwrite lastCwd on the next iteration.
+	// Scratch buffers for first/last fields. Without these, every conv
+	// line would allocate a fresh string just to overwrite lastCwd on
+	// the next iteration.
 	var firstCwdBuf, firstTimestampBuf, lastCwdBuf []byte
 	gotFirst := false
-	modelCaptured := false
 
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 {
 			continue
 		}
-		// Fast path: detect conversation events by full-value substring
-		// match. The pre-filter is ALSO the type classifier — it carries
-		// the value bytes ("user" / "assistant") in the pattern itself,
-		// which is robust to JSON key ordering AND to nested objects
-		// that have their own `"type":"X"` keys (content blocks use
-		// `"type":"text"`, `"type":"tool_use"`, etc.; none of those
-		// values match our patterns).
-		//
-		// The vast majority of lines in real ~/.claude/projects files
-		// are meta / side-band (queue-operation, system, attachment,
-		// file-history-snapshot, permission-mode, …) and bail here.
 		isAssistant := bytes.Contains(line, typeTagAssistant)
 		isUser := !isAssistant && bytes.Contains(line, typeTagUser)
 		if !isUser && !isAssistant {
@@ -144,24 +98,20 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 
 		uuidBytes, ok := jsonStringField(line, uuidPat)
 		if !ok || len(uuidBytes) == 0 {
-			// Meta lines lack uuids (docs/jsonl-schema.md §3); skip.
+			// Meta lines lack uuids (docs/jsonl-schema.md §3).
 			continue
 		}
 
-		// Capture the first non-<synthetic> assistant model. "model"
-		// only appears at top-level inside the message sub-object,
-		// which is unique to assistant lines — see scanFileMeta godoc.
-		if !modelCaptured && isAssistant {
+		if m.model == "" && isAssistant {
 			if modelBytes, ok := jsonStringField(line, modelPat); ok && len(modelBytes) > 0 && !bytes.Equal(modelBytes, syntheticBytes) {
 				m.model = string(modelBytes)
-				modelCaptured = true
 			}
 		}
 
-		timestampBytes, _ := jsonStringField(line, timestampPat)
 		cwdBytes, _ := jsonStringField(line, cwdPat)
 
 		if !gotFirst {
+			timestampBytes, _ := jsonStringField(line, timestampPat)
 			firstCwdBuf = append(firstCwdBuf[:0], cwdBytes...)
 			firstTimestampBuf = append(firstTimestampBuf[:0], timestampBytes...)
 			gotFirst = true
@@ -185,20 +135,14 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 	return m, nil
 }
 
-// jsonStringField extracts the value of a top-level string-typed field
-// from a canonical JSONL line. pat must include the surrounding
-// punctuation, e.g. `"uuid":"`. Returns (nil, false) when the pattern
-// is absent or the value is unterminated.
+// jsonStringField returns the string value following pat (which must
+// include the trailing `":"`, e.g. `"uuid":"`) in a canonical JSONL
+// line. The result aliases line; copy it before the next Scanner fill.
 //
-// The returned slice aliases the input — callers that need to retain
-// the value past the next bufio.Scanner.Scan must copy it.
-//
-// Does NOT honor JSON escape sequences inside the matched value. The
-// fields scanFileMeta extracts (type, uuid, timestamp, cwd, model) are
-// all enum-like or generated identifiers that never contain " or \ in
-// CLI output, so a literal scan to the next " is safe. Adding a new
-// caller for a field whose value can contain embedded quotes would
-// require revisiting this.
+// Does not honor JSON escape sequences inside the matched value. The
+// fields scanFileMeta extracts (uuid, timestamp, cwd, model) never
+// contain " or \ in CLI output. A new caller whose value can carry
+// embedded quotes must use a real JSON parse instead.
 func jsonStringField(line, pat []byte) ([]byte, bool) {
 	i := bytes.Index(line, pat)
 	if i < 0 {

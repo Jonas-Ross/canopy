@@ -12,13 +12,9 @@ import (
 // side-band lines in between are ignored for cwd purposes.
 func TestScanFileMeta_FirstAndLastCwd(t *testing.T) {
 	body := joinLines(
-		// Meta line (no uuid) — must NOT influence cwd.
 		`{"type":"queue-operation","operation":"enqueue","cwd":"/should/be/ignored"}`,
-		// First conversation event: user with cwd A.
 		`{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/path/a","message":{"role":"user","content":"hi"}}`,
-		// Side-band line (has uuid, but type=system) — must NOT influence cwd.
 		`{"type":"system","uuid":"s1","timestamp":"2026-01-01T00:00:01.000Z","cwd":"/should/be/ignored"}`,
-		// Last conversation event: assistant with cwd B.
 		`{"type":"assistant","uuid":"a1","timestamp":"2026-01-01T00:00:02.000Z","cwd":"/path/b","message":{"model":"claude-opus-4-7","content":[]}}`,
 	)
 
@@ -116,7 +112,8 @@ func TestScanFileMeta_ModelExtraction(t *testing.T) {
 // first/last cwd or startedAt.
 func TestScanFileMeta_MetaLinesIgnored(t *testing.T) {
 	body := joinLines(
-		// All meta types from docs/jsonl-schema.md §3 that lack a uuid.
+		// Every meta type from docs/jsonl-schema.md §3 (none have uuid)
+		// followed by one real conv line for the positive assertion.
 		`{"type":"permission-mode","mode":"acceptEdits"}`,
 		`{"type":"queue-operation","operation":"enqueue"}`,
 		`{"type":"ai-title","title":"foo"}`,
@@ -127,7 +124,6 @@ func TestScanFileMeta_MetaLinesIgnored(t *testing.T) {
 		`{"type":"custom-title","title":"bar"}`,
 		`{"type":"worktree-state","state":"clean"}`,
 		`{"type":"agent-setting","key":"x"}`,
-		// One genuine conv line so we can verify the extractedMeta is correct.
 		`{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/real","message":{"role":"user","content":"hi"}}`,
 	)
 	got, err := scanFileMeta(strings.NewReader(body))
@@ -322,10 +318,6 @@ func TestScanFileMeta_ParentUuidDoesNotMaskUuid(t *testing.T) {
 // shape that broke without the pre-filter-as-classifier rule.
 func TestScanFileMeta_AlphabetizedKeysWithNestedType(t *testing.T) {
 	body := joinLines(
-		// Alphabetized order: cwd, message, sessionId, timestamp, type, uuid.
-		// Crucially, message.content holds a content block with
-		// "type":"text" — that nested `"type":"` appears in the byte
-		// stream BEFORE the top-level `"type":"assistant"`.
 		`{"cwd":"/demo","message":{"content":[{"text":"hi","type":"text"}],"id":"msg_01","model":"claude-opus-4-7","role":"assistant"},"sessionId":"s","timestamp":"2026-01-01T00:00:00.000Z","type":"assistant","uuid":"a1"}`,
 	)
 	got, err := scanFileMeta(strings.NewReader(body))
@@ -350,9 +342,6 @@ func TestScanFileMeta_AlphabetizedKeysWithNestedType(t *testing.T) {
 // `"key":"` only appears at top level in canonical JSON" assumption.
 func TestScanFileMeta_EscapedQuotesInContent(t *testing.T) {
 	body := joinLines(
-		// Real uuid is "real-uuid". The tool_result content contains a
-		// JSON-encoded snippet whose interior quotes are escaped — those
-		// must NOT short-circuit the real uuid extraction.
 		`{"type":"user","uuid":"real-uuid","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/correct","message":{"role":"user","content":"{\"uuid\":\"fake-uuid\",\"cwd\":\"/wrong\",\"type\":\"user\"}"}}`,
 	)
 	got, err := scanFileMeta(strings.NewReader(body))
