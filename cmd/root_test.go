@@ -27,3 +27,15 @@ func TestRootCommand_Help(t *testing.T) {
 		t.Errorf("--help output does not contain 'canopy'; got %q", got)
 	}
 }
+
+// TestRootCommand_Help_ListsSubcommands asserts that `canopy --help` lists
+// each top-level subcommand scaffolded in M5. This guards the acceptance
+// criterion "canopy --help shows the subcommand tree" from issue #6.
+func TestRootCommand_Help_ListsSubcommands(t *testing.T) {
+	got := runRootCmd(t, "--help")
+	for _, name := range []string{"worktree", "sessions", "prune"} {
+		if !strings.Contains(got, name) {
+			t.Errorf("--help missing subcommand %q; got %q", name, got)
+		}
+	}
+}
