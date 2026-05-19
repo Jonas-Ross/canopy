@@ -32,14 +32,7 @@ func TestRootCommand_Help(t *testing.T) {
 // each top-level subcommand scaffolded in M5. This guards the acceptance
 // criterion "canopy --help shows the subcommand tree" from issue #6.
 func TestRootCommand_Help_ListsSubcommands(t *testing.T) {
-	var out bytes.Buffer
-	rootCmd.SetOut(&out)
-	rootCmd.SetErr(&out)
-	rootCmd.SetArgs([]string{"--help"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	got := out.String()
+	got := runRootCmd(t, "--help")
 	for _, name := range []string{"worktree", "sessions", "prune"} {
 		if !strings.Contains(got, name) {
 			t.Errorf("--help missing subcommand %q; got %q", name, got)
