@@ -165,7 +165,8 @@ type TokenStats struct {
 }
 
 // Session is the metadata view of one JSONL file. Cheap at Open time;
-// Tokens, Tools, EventCount, and the full Cwds set are filled by Hydrate.
+// Tokens, Tools, EventCount, Meta, and the full Cwds set are filled by
+// Hydrate.
 //
 // note: pointers returned by Sessions / Session / Query /
 // SessionsByCwdPrefix are stable index entries owned by the Store.
@@ -194,6 +195,47 @@ type Session struct {
 	EventCount int
 	Tokens     TokenStats
 	Tools      map[string]int // non-nil empty map after Hydrate; range-safe without nil check
+	Meta       SessionMeta    // last-write-wins state from JSONL meta lines
+}
+
+// SessionMeta is the last-write-wins state expressed by JSONL meta
+// lines (no uuid / timestamp; the CLI rewrites them per turn).
+// Populated by Hydrate; zero before. Events() filters meta lines out
+// of its output — Meta is the only surface exposing them.
+//
+// file-history-snapshot lines are deliberately not represented here:
+// their payload is a snapshot blob, not flat last-write-wins state.
+// Unknown meta types fall through silently (forward-compat).
+type SessionMeta struct {
+	LastPrompt     string            // from last-prompt.lastPrompt
+	AITitle        string            // from ai-title.aiTitle
+	CustomTitle    string            // from custom-title.customTitle
+	PermissionMode string            // from permission-mode.permissionMode
+	AgentName      string            // from agent-name.agentName
+	AgentSetting   string            // from agent-setting.agentSetting
+	PRLink         PRLinkMeta        // from pr-link
+	WorktreeState  WorktreeStateMeta // from worktree-state.worktreeSession
+	QueueOperation QueueOpMeta       // from queue-operation
+}
+
+type PRLinkMeta struct {
+	Number     int    // pr-link.prNumber
+	URL        string // pr-link.prUrl
+	Repository string // pr-link.prRepository
+}
+
+type WorktreeStateMeta struct {
+	OriginalCwd        string
+	WorktreePath       string
+	WorktreeName       string
+	WorktreeBranch     string
+	OriginalBranch     string
+	OriginalHeadCommit string
+}
+
+type QueueOpMeta struct {
+	Operation string // queue-operation.operation
+	Content   string // queue-operation.content
 }
 
 // Query filters the session index. Zero-valued fields are wildcards.
@@ -272,8 +314,9 @@ func (s *Store) Query(q Query) iter.Seq[*Session] { /* impl */ return nil }
 func (s *Store) SessionsByCwdPrefix(prefix string) []*Session { /* impl */ return nil }
 
 // Hydrate fills the lazy fields on Session: EventCount, Tokens, Tools,
-// and the full Cwds set. Idempotent. After Hydrate, Session.Tools is a
-// non-nil (possibly empty) map.
+// Meta, and the full Cwds set. Idempotent. After Hydrate, Session.Tools
+// is a non-nil (possibly empty) map and Session.Meta carries the
+// last-write-wins state from JSONL meta lines.
 //
 // note: token aggregation dedupes by message.id before summing — the CLI
 // emits one JSONL line per content block, each line carrying the full
@@ -360,10 +403,11 @@ for ev, err := range store.Events(live.ID) {
 - **File-position checkpointing for Tail** — restart picks up live via
   fsnotify; resume-from-offset is a v2 concern. See jsonl-schema.md §10
   Pending.
-- **`SessionMeta`** (last-prompt, ai-title, pr-link, agent-name,
-  custom-title, queue-operation, worktree-state, agent-setting) — likely
-  a future `Session.Meta()` populated on Hydrate; not in v1. See
-  jsonl-schema.md §10 Pending.
+- **`file-history-snapshot` payload** — counted out of `Events` like
+  the other side-band lines, and intentionally not modeled on
+  `SessionMeta`. The payload is a snapshot blob, not flat last-write-
+  wins state; a typed surface would require sampling more production
+  fixtures first.
 - **Attachment / system subtype filtering policy** — parser-internal, not
   interface. Default: drop the noisy side-band; promote `compact_boundary`.
 - **`<synthetic>` model sentinel handling** — implementation detail of
