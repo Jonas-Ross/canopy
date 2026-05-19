@@ -1,8 +1,10 @@
 package sessions
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 )
@@ -26,20 +28,20 @@ type inflightHydrate struct {
 var storeGates sync.Map // map[*Store]*sync.Map
 
 // Hydrate fills the lazy fields on Session: EventCount, Tokens, Tools,
-// and the full Cwds set. Idempotent: each call re-scans the JSONL and
-// overwrites — repeated calls converge on the same final state. The
-// per-session single-flight ensures concurrent callers share one scan
-// rather than racing on the file.
+// Meta, and the full Cwds set. Idempotent: each call re-scans the
+// JSONL and overwrites — repeated calls converge on the same final
+// state. The per-session single-flight ensures concurrent callers
+// share one scan rather than racing on the file.
 //
 // Behavior:
 //   - sess == nil or sess.ID == "" returns an error.
 //   - A session ID not present in the index returns a wrapped
 //     ErrNotFound.
-//   - The session's JSONL file is iterated via Events(sess.ID).
-//     Malformed lines fail Hydrate fast (Hydrate is about accurate
-//     aggregation, not best-effort rendering).
-//   - EventCount counts every event surfaced by Events (post-meta /
-//     side-band filtering).
+//   - The session's JSONL file is scanned line by line. Malformed
+//     lines fail Hydrate fast (Hydrate is about accurate aggregation,
+//     not best-effort rendering).
+//   - EventCount counts every event surfaced by the same classifier
+//     Events() uses (post-meta / side-band filtering).
 //   - Tokens are summed across assistant lines deduped by message.id:
 //     the CLI splits one logical assistant response across multiple
 //     JSONL lines that all carry the same message.id and the same
@@ -53,6 +55,11 @@ var storeGates sync.Map // map[*Store]*sync.Map
 //   - CompactBoundary events contribute to EventCount only; their
 //     PreCompactTokens / PostCompactTokens are scratch reference
 //     (real per-message accounting lives on assistant lines).
+//   - Meta is folded from JSONL meta lines (last-prompt, ai-title,
+//     permission-mode, agent-name, custom-title, agent-setting,
+//     pr-link, worktree-state, queue-operation) with last-write-wins
+//     semantics. Meta lines do not count toward EventCount. The
+//     Events() contract is unchanged — they are still filtered there.
 //
 // Concurrency contract:
 //   - Concurrent Hydrate calls for the same session collapse into one
@@ -137,12 +144,14 @@ func commitHydrate(s *Store, indexed, sess *Session, result hydrateResult) {
 	indexed.Tokens = result.tokens
 	indexed.Tools = result.tools
 	indexed.Cwds = result.cwds
+	indexed.Meta = result.meta
 
 	if sess != indexed {
 		sess.EventCount = result.eventCount
 		sess.Tokens = result.tokens
 		sess.Tools = result.tools
 		sess.Cwds = result.cwds
+		sess.Meta = result.meta
 	}
 }
 
@@ -168,65 +177,121 @@ type hydrateResult struct {
 	tokens     TokenStats
 	tools      map[string]int
 	cwds       []string
+	meta       SessionMeta
 }
 
-// computeHydrate iterates the session's events once and returns the
-// aggregated fields. It does not mutate any *Session; the caller
-// commits the result under the per-session gate.
+// computeHydrate scans the session's JSONL file once and returns the
+// aggregated event totals plus the folded SessionMeta. It does not
+// mutate any *Session; the caller commits the result under the
+// per-session gate.
+//
+// One scan handles both event and meta classification: each non-blank
+// line is fed to eventsFromLine first (the common case is an event
+// line); lines that surface no events are tried via metaFromLine so
+// the meta state lands in the same hydrateResult.
 func computeHydrate(s *Store, sessionID string) (hydrateResult, error) {
+	sess, err := s.Session(sessionID)
+	if err != nil {
+		return hydrateResult{}, fmt.Errorf("sessions: hydrate %s: %w", sessionID, err)
+	}
+
+	f, err := os.Open(sess.Path)
+	if err != nil {
+		return hydrateResult{}, fmt.Errorf("sessions: hydrate %s: open %s: %w", sessionID, sess.Path, err)
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), maxScanLineSize)
+
 	res := hydrateResult{
 		tools: make(map[string]int),
 	}
 	seenMessageIDs := make(map[string]struct{})
 	seenCwds := make(map[string]struct{})
 
-	for ev, err := range s.Events(sessionID) {
-		if err != nil {
-			return hydrateResult{}, fmt.Errorf("sessions: hydrate %s: %w", sessionID, err)
+	lineNum := 0
+	for sc.Scan() {
+		lineNum++
+		line := sc.Bytes()
+		if isBlank(line) {
+			continue
 		}
-		res.eventCount++
 
-		switch ev.Kind {
-		case EventAssistant:
-			if ev.Assistant == nil {
-				continue
-			}
-			if id := ev.Assistant.MessageID; id != "" {
-				if _, dup := seenMessageIDs[id]; dup {
-					continue
-				}
-				seenMessageIDs[id] = struct{}{}
-			}
-			// Assistant lines without a MessageID are treated as
-			// their own bucket (one-shot accounting); we cannot
-			// dedupe what the CLI did not key. In practice this is
-			// vanishingly rare on real data.
-			res.tokens.Input += ev.Assistant.Tokens.Input
-			res.tokens.Output += ev.Assistant.Tokens.Output
-			res.tokens.CacheRead += ev.Assistant.Tokens.CacheRead
-			res.tokens.CacheCreation += ev.Assistant.Tokens.CacheCreation
+		buf := make([]byte, len(line))
+		copy(buf, line)
 
-		case EventToolUse:
-			if ev.ToolUse == nil {
-				continue
-			}
-			res.tools[ev.ToolUse.Name]++
-
-		case EventUser:
-			if ev.User != nil {
-				cwd := ev.User.Cwd
-				if cwd != "" {
-					if _, dup := seenCwds[cwd]; !dup {
-						seenCwds[cwd] = struct{}{}
-						res.cwds = append(res.cwds, cwd)
-					}
-				}
-			}
-
-		case EventToolResult, EventCompactBoundary:
-			// Counted in EventCount above; nothing else to aggregate.
+		events, perr := eventsFromLine(buf, sess.ID)
+		if perr != nil {
+			return hydrateResult{}, fmt.Errorf("sessions: hydrate %s: malformed line %d in %s: %w", sessionID, lineNum, sess.Path, perr)
 		}
+
+		if len(events) > 0 {
+			for _, ev := range events {
+				foldEvent(&res, ev, seenMessageIDs, seenCwds)
+			}
+			continue
+		}
+
+		// No events surfaced. Could be a meta line we want to fold,
+		// or a filtered side-band / isMeta line — metaFromLine
+		// returns false for the latter.
+		if mu, ok, _ := metaFromLine(buf); ok {
+			applyMetaUpdate(&res.meta, mu)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return hydrateResult{}, fmt.Errorf("sessions: hydrate %s: scan %s: %w", sessionID, sess.Path, err)
 	}
 
 	return res, nil
+}
+
+// foldEvent applies one Event to the running hydrateResult. Split out
+// of computeHydrate's hot loop so the scan body stays scannable.
+func foldEvent(res *hydrateResult, ev Event, seenMessageIDs, seenCwds map[string]struct{}) {
+	res.eventCount++
+
+	switch ev.Kind {
+	case EventAssistant:
+		if ev.Assistant == nil {
+			return
+		}
+		if id := ev.Assistant.MessageID; id != "" {
+			if _, dup := seenMessageIDs[id]; dup {
+				return
+			}
+			seenMessageIDs[id] = struct{}{}
+		}
+		// Assistant lines without a MessageID are treated as their
+		// own bucket (one-shot accounting); we cannot dedupe what the
+		// CLI did not key. In practice this is vanishingly rare on
+		// real data.
+		res.tokens.Input += ev.Assistant.Tokens.Input
+		res.tokens.Output += ev.Assistant.Tokens.Output
+		res.tokens.CacheRead += ev.Assistant.Tokens.CacheRead
+		res.tokens.CacheCreation += ev.Assistant.Tokens.CacheCreation
+
+	case EventToolUse:
+		if ev.ToolUse == nil {
+			return
+		}
+		res.tools[ev.ToolUse.Name]++
+
+	case EventUser:
+		if ev.User == nil {
+			return
+		}
+		cwd := ev.User.Cwd
+		if cwd == "" {
+			return
+		}
+		if _, dup := seenCwds[cwd]; !dup {
+			seenCwds[cwd] = struct{}{}
+			res.cwds = append(res.cwds, cwd)
+		}
+
+	case EventToolResult, EventCompactBoundary:
+		// Counted in EventCount above; nothing else to aggregate.
+	}
 }

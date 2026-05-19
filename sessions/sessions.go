@@ -143,7 +143,8 @@ type TokenStats struct {
 }
 
 // Session is the metadata view of one JSONL file. Cheap at Open time;
-// Tokens, Tools, EventCount, and the full Cwds set are filled by Hydrate.
+// Tokens, Tools, EventCount, Meta, and the full Cwds set are filled by
+// Hydrate.
 //
 // note: pointers returned by Sessions / Session / Query /
 // SessionsByCwdPrefix are stable index entries owned by the Store.
@@ -172,6 +173,55 @@ type Session struct {
 	EventCount int
 	Tokens     TokenStats
 	Tools      map[string]int // non-nil empty map after Hydrate; range-safe without nil check
+	Meta       SessionMeta    // last-write-wins state from JSONL meta lines
+}
+
+// SessionMeta is the last-write-wins state expressed by JSONL meta
+// lines (no uuid / timestamp; the CLI rewrites them per turn). Field
+// names mirror the production schema sampled from ~/.claude/projects;
+// see docs/jsonl-schema.md §3. Populated by Hydrate; zero before.
+//
+// file-history-snapshot lines are deliberately not represented here:
+// their payload is a snapshot blob rather than flat last-write-wins
+// state. Unknown meta types fall through silently (forward-compat).
+type SessionMeta struct {
+	LastPrompt     string            // from last-prompt.lastPrompt
+	AITitle        string            // from ai-title.aiTitle
+	CustomTitle    string            // from custom-title.customTitle
+	PermissionMode string            // from permission-mode.permissionMode
+	AgentName      string            // from agent-name.agentName
+	AgentSetting   string            // from agent-setting.agentSetting
+	PRLink         PRLinkMeta        // from pr-link
+	WorktreeState  WorktreeStateMeta // from worktree-state.worktreeSession
+	QueueOperation QueueOpMeta       // from queue-operation
+}
+
+// PRLinkMeta carries the fields of a pr-link meta line. Zero value
+// means no pr-link line was seen for this session.
+type PRLinkMeta struct {
+	Number     int    // from pr-link.prNumber
+	URL        string // from pr-link.prUrl
+	Repository string // from pr-link.prRepository
+}
+
+// WorktreeStateMeta carries the inner worktreeSession object of a
+// worktree-state meta line. Zero value means no worktree-state line
+// was seen.
+type WorktreeStateMeta struct {
+	OriginalCwd        string
+	WorktreePath       string
+	WorktreeName       string
+	WorktreeBranch     string
+	OriginalBranch     string
+	OriginalHeadCommit string
+}
+
+// QueueOpMeta carries the operation and content of the most recent
+// queue-operation meta line. Zero value means no queue-operation line
+// was seen.
+type QueueOpMeta struct {
+	Operation string // from queue-operation.operation
+	Content   string // from queue-operation.content
 }
 
 // Query filters the session index. Zero-valued fields are wildcards.

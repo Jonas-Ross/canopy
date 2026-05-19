@@ -283,6 +283,6 @@ v1 sketch where they conflict.
 - Timestamp ordering tie-break via `parentUuid` chain (§8 item 11).
 - `<synthetic>` model sentinel handling.
 - Attachment / system subtype filtering policy (§8 item 12) — which to surface, which to drop.
-- Meta-line state-rewrite handling (`last-prompt`, `ai-title`, `pr-link`, etc.) — likely a `SessionMeta` struct exposed via `Session.Meta()`, populated on `Hydrate()`.
+- ~~Meta-line state-rewrite handling (`last-prompt`, `ai-title`, `pr-link`, etc.)~~ — **resolved (#11)**: `SessionMeta` is a public field on `Session`, populated by `Hydrate()` with last-write-wins semantics. `file-history-snapshot` stays filtered (snapshot payload, not flat state).
 - File-position checkpointing for `Tail` (so restart picks up where we left off).
 
