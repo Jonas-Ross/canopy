@@ -1079,3 +1079,53 @@ func renderGHJSON(prs []pr.PR) []byte {
 	b.WriteString("]")
 	return []byte(b.String())
 }
+
+// TestSnapshot_ParallelizesWorktreeStatus pins that per-worktree status
+// fetches fan out concurrently. 50 calls at 10ms each is ~500ms serial;
+// the bounded parallel fan-out (16 wide) finishes in ~40ms.
+func TestSnapshot_ParallelizesWorktreeStatus(t *testing.T) {
+	const (
+		nWorktrees  = 50
+		statusDelay = 10 * time.Millisecond
+		ceiling     = 200 * time.Millisecond
+	)
+	repoRoot := t.TempDir()
+	wts := make([]git.Worktree, nWorktrees)
+	for i := range wts {
+		wts[i] = git.Worktree{
+			Path:   filepath.Join(repoRoot, fmt.Sprintf("wt-%02d", i)),
+			Branch: fmt.Sprintf("feat/%02d", i),
+		}
+	}
+	fakes := &fakeSources{
+		worktrees: map[string][]git.Worktree{repoRoot: wts},
+	}
+	slowStatus := func(ctx context.Context, path string) (git.Worktree, error) {
+		time.Sleep(statusDelay)
+		return git.Worktree{Path: path}, nil
+	}
+
+	store := openTestSessionStore(t, func(string) {})
+	a := newTestAggregator(t, Config{
+		Repos:               []Repo{{Root: repoRoot, Name: "repo"}},
+		SessionStore:        store,
+		listWorktrees:       fakes.listWorktrees,
+		worktreeStatus:      slowStatus,
+		listProcsByPrefixes: fakes.listProcsByPrefixes,
+		now:                 fixedNow,
+	})
+
+	start := time.Now()
+	got, err := a.Snapshot(context.Background())
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if len(got) != nWorktrees {
+		t.Fatalf("Snapshot: got %d states, want %d", len(got), nWorktrees)
+	}
+	if elapsed > ceiling {
+		t.Fatalf("Snapshot of %d worktrees took %v; serial baseline ~%v, parallel target <%v",
+			nWorktrees, elapsed, time.Duration(nWorktrees)*statusDelay, ceiling)
+	}
+}
