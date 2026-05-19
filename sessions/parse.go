@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,17 @@ import (
 // maxScanLineSize is the buffer ceiling for bufio.Scanner. Some real
 // JSONL lines (attachments, large tool inputs/outputs) are multi-MB.
 const maxScanLineSize = 10 * 1024 * 1024
+
+// Canonical type-tag bytes used to short-circuit non-conversation lines
+// before json.Unmarshal. Relies on the Claude CLI's canonical JSON
+// output (no whitespace, type-first). A non-canonical line that
+// otherwise represents a conversation event would be missed; this is
+// covered by TestScanFileMeta_NonCanonicalKeyOrder, which exercises a
+// line where "type" is NOT the first key.
+var (
+	typeTagUser      = []byte(`"type":"user"`)
+	typeTagAssistant = []byte(`"type":"assistant"`)
+)
 
 // rawLine is a minimal projection of a JSONL line. Only fields needed
 // for the Open-time first/last conversation event extraction are
@@ -72,6 +84,19 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 {
+			continue
+		}
+		// Fast path: most JSONL lines are meta or side-band
+		// (queue-operation, system, attachment, file-history-snapshot,
+		// …). Skip the full json.Unmarshal — including the per-line
+		// rawLine struct alloc and the json.RawMessage copy of
+		// `message` — when the line cannot possibly be a conversation
+		// event. Safe because the CLI emits canonical JSON; if a
+		// non-conv line ever contains `"type":"user"` as a substring
+		// (e.g. inside a stringified tool result), we fall through and
+		// the downstream type check still rejects it. Falls back to
+		// full parse for lines that look conv-ish.
+		if !bytes.Contains(line, typeTagUser) && !bytes.Contains(line, typeTagAssistant) {
 			continue
 		}
 		var raw rawLine
