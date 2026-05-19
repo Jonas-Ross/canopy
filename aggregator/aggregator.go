@@ -97,11 +97,9 @@ type visit struct {
 	prStale  bool
 }
 
-// statusesParallel fans out worktreeStatus across paths with a bounded
-// semaphore. Returns a map keyed by path; absent entries indicate the
-// per-path call failed and the caller should fall back to the
-// identity-only Worktree (matches the prior serial soft-degrade in
-// buildState).
+// statusesParallel fans out worktreeStatus across paths under a bounded
+// semaphore. Absent entries in the returned map indicate per-path
+// failures; callers fall back to the identity-only Worktree.
 func (a *Aggregator) statusesParallel(ctx context.Context, paths []string) map[string]git.Worktree {
 	out := make(map[string]git.Worktree, len(paths))
 	if len(paths) == 0 {
@@ -154,7 +152,7 @@ func (a *Aggregator) Snapshot(ctx context.Context) ([]WorktreeState, error) {
 	statusByPath := a.statusesParallel(ctx, prefixes)
 	out := make([]WorktreeState, 0, len(visits))
 	for _, v := range visits {
-		out = append(out, a.buildState(ctx, v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix, statusByPath))
+		out = append(out, a.buildState(v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix, statusByPath))
 	}
 	return out, nil
 }
@@ -219,10 +217,8 @@ func (a *Aggregator) procsSnapshot(ctx context.Context, prefixes []string) map[s
 // the list of every worktree path in the same repo — used to attribute a
 // prefix-matched session or process to the deepest containing worktree
 // (e.g. a session under /repo/.worktrees/feat must NOT also appear under
-// /repo). statusByPath holds pre-fetched WorktreeStatus results keyed by
-// worktree path; absent entries (per-path fetch failure) cause buildState
-// to fall back to the identity-only Worktree from ListWorktrees.
-func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree, siblings []string, prList []pr.PR, prStale bool, procsByPrefix map[string][]procs.Process, statusByPath map[string]git.Worktree) WorktreeState {
+// /repo). statusByPath supplies pre-fetched WorktreeStatus results.
+func (a *Aggregator) buildState(repo Repo, wt git.Worktree, siblings []string, prList []pr.PR, prStale bool, procsByPrefix map[string][]procs.Process, statusByPath map[string]git.Worktree) WorktreeState {
 	state := WorktreeState{
 		Repo:      repo,
 		Worktree:  wt,

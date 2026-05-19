@@ -180,7 +180,7 @@ func (a *Aggregator) refreshAll(
 	for _, v := range visits {
 		seen[v.wt.Path] = struct{}{}
 		pathToRepo[v.wt.Path] = v.repo
-		next := a.buildState(ctx, v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix, statusByPath)
+		next := a.buildState(v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix, statusByPath)
 		prev, had := state[v.wt.Path]
 		state[v.wt.Path] = next
 		if broadcast && (!had || !worktreeStatesEqual(prev, next)) {
@@ -234,7 +234,7 @@ func (a *Aggregator) refreshOne(
 	siblings := siblingPaths(pathToRepo, repo)
 	procsByPrefix := a.procsSnapshot(ctx, []string{path})
 	statusByPath := map[string]git.Worktree{path: full}
-	next := a.buildState(ctx, repo, full, siblings, prList, prStale, procsByPrefix, statusByPath)
+	next := a.buildState(repo, full, siblings, prList, prStale, procsByPrefix, statusByPath)
 	state[path] = next
 	if !had || !worktreeStatesEqual(prev, next) {
 		a.broadcast(subscribers, Update{Worktree: path, State: next})
