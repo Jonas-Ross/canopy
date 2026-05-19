@@ -1081,10 +1081,8 @@ func renderGHJSON(prs []pr.PR) []byte {
 }
 
 // TestSnapshot_ParallelizesWorktreeStatus pins that per-worktree status
-// fetches inside Snapshot fan out concurrently. With 50 worktrees and a
-// 10ms slow status fake, the serial baseline is ~500ms; a bounded
-// parallel implementation (16 concurrent) completes in ~40-50ms. The
-// 200ms ceiling is the well-below-serial threshold from issue #8.
+// fetches fan out concurrently. 50 calls at 10ms each is ~500ms serial;
+// the bounded parallel fan-out (16 wide) finishes in ~40ms.
 func TestSnapshot_ParallelizesWorktreeStatus(t *testing.T) {
 	const (
 		nWorktrees  = 50

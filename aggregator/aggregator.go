@@ -80,10 +80,9 @@ func withDefaults(cfg Config) Config {
 	return cfg
 }
 
-// maxParallelStatus bounds the fan-out of worktreeStatus calls in
-// statusesParallel. Each WorktreeStatus shells out 4 git subprocesses;
-// 16 keeps even a 100-worktree refresh well under a second without
-// flooding the OS process table on a typical workstation.
+// maxParallelStatus bounds the worktreeStatus fan-out in
+// statusesParallel. Each call shells out 4 git subprocesses; 16
+// keeps a 100-worktree refresh well under a second.
 const maxParallelStatus = 16
 
 // visit is one (repo, worktree) tuple captured during walkAll, used to
