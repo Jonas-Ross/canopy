@@ -291,6 +291,99 @@ func TestScanFileMeta_PooledBufferNoCrossContamination(t *testing.T) {
 	}
 }
 
+// TestScanFileMeta_ParentUuidDoesNotMaskUuid pins that the byte-level
+// uuid extractor doesn't accidentally pick up "parentUuid" as the
+// line's uuid. "parentUuid" precedes "uuid" alphabetically and the
+// canonical CLI output places it FIRST on most lines, so a naive
+// substring search for "uuid":" against a parentUuid'd line would
+// otherwise extract the parent's uuid.
+func TestScanFileMeta_ParentUuidDoesNotMaskUuid(t *testing.T) {
+	body := joinLines(
+		`{"type":"user","parentUuid":"pppp-1111","uuid":"uuuu-2222","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/x","message":{"role":"user","content":"hi"}}`,
+	)
+	got, err := scanFileMeta(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("scanFileMeta: %v", err)
+	}
+	if !got.hasAnyConvLine {
+		t.Fatalf("hasAnyConvLine = false, want true")
+	}
+	if got.firstCwd != "/x" {
+		t.Errorf("firstCwd = %q, want /x", got.firstCwd)
+	}
+}
+
+// TestScanFileMeta_EscapedQuotesInContent pins that a tool-result whose
+// content payload contains the LITERAL bytes `"uuid":"..."` (after
+// JSON-encoding, those `"` become `\"`) doesn't trick the extractor
+// into reading a fake uuid. This is the safety net behind the "raw
+// `"key":"` only appears at top level in canonical JSON" assumption.
+func TestScanFileMeta_EscapedQuotesInContent(t *testing.T) {
+	body := joinLines(
+		// Real uuid is "real-uuid". The tool_result content contains a
+		// JSON-encoded snippet whose interior quotes are escaped — those
+		// must NOT short-circuit the real uuid extraction.
+		`{"type":"user","uuid":"real-uuid","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/correct","message":{"role":"user","content":"{\"uuid\":\"fake-uuid\",\"cwd\":\"/wrong\",\"type\":\"user\"}"}}`,
+	)
+	got, err := scanFileMeta(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("scanFileMeta: %v", err)
+	}
+	if got.firstCwd != "/correct" {
+		t.Errorf("firstCwd = %q, want /correct (extractor confused by escaped content)", got.firstCwd)
+	}
+}
+
+// TestScanFileMeta_EmptyCwdAllowed pins that an empty cwd value
+// (`"cwd":""`) is preserved as-is rather than crashing the extractor.
+// dedupeCwds downstream collapses this to nil; the field-level
+// extractor just needs to round-trip the value faithfully.
+func TestScanFileMeta_EmptyCwdAllowed(t *testing.T) {
+	body := joinLines(
+		`{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"","message":{"role":"user","content":"hi"}}`,
+	)
+	got, err := scanFileMeta(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("scanFileMeta: %v", err)
+	}
+	if !got.hasAnyConvLine {
+		t.Fatalf("hasAnyConvLine = false, want true")
+	}
+	if got.firstCwd != "" || got.lastCwd != "" {
+		t.Errorf("cwds = (%q, %q), want both empty", got.firstCwd, got.lastCwd)
+	}
+}
+
+// TestJsonStringField directly exercises the byte extractor used by
+// scanFileMeta. Failures here narrow blame for any scanFileMeta
+// regression introduced by extractor edge cases.
+func TestJsonStringField(t *testing.T) {
+	tests := []struct {
+		name    string
+		line    string
+		pat     string
+		want    string
+		wantOK  bool
+	}{
+		{"present", `{"type":"user"}`, `"type":"`, "user", true},
+		{"absent", `{"type":"system"}`, `"missing":"`, "", false},
+		{"empty value", `{"cwd":""}`, `"cwd":"`, "", true},
+		{"value at end of object", `{"type":"assistant","model":"opus"}`, `"model":"`, "opus", true},
+		{"unterminated", `{"type":"user`, `"type":"`, "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := jsonStringField([]byte(tc.line), []byte(tc.pat))
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if string(got) != tc.want {
+				t.Errorf("value = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // joinLines stitches JSONL test fixtures with newlines, leaving a final
 // newline so bufio.Scanner sees the last line cleanly.
 func joinLines(lines ...string) string {
