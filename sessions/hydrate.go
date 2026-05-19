@@ -140,19 +140,18 @@ func commitHydrate(s *Store, indexed, sess *Session, result hydrateResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	indexed.EventCount = result.eventCount
-	indexed.Tokens = result.tokens
-	indexed.Tools = result.tools
-	indexed.Cwds = result.cwds
-	indexed.Meta = result.meta
-
+	applyHydrateResult(indexed, result)
 	if sess != indexed {
-		sess.EventCount = result.eventCount
-		sess.Tokens = result.tokens
-		sess.Tools = result.tools
-		sess.Cwds = result.cwds
-		sess.Meta = result.meta
+		applyHydrateResult(sess, result)
 	}
+}
+
+func applyHydrateResult(s *Session, r hydrateResult) {
+	s.EventCount = r.eventCount
+	s.Tokens = r.tokens
+	s.Tools = r.tools
+	s.Cwds = r.cwds
+	s.Meta = r.meta
 }
 
 // hydrateScanHook is a test-only seam invoked at the start of every
@@ -184,11 +183,6 @@ type hydrateResult struct {
 // aggregated event totals plus the folded SessionMeta. It does not
 // mutate any *Session; the caller commits the result under the
 // per-session gate.
-//
-// One scan handles both event and meta classification: each non-blank
-// line is fed to eventsFromLine first (the common case is an event
-// line); lines that surface no events are tried via metaFromLine so
-// the meta state lands in the same hydrateResult.
 func computeHydrate(s *Store, sessionID string) (hydrateResult, error) {
 	sess, err := s.Session(sessionID)
 	if err != nil {
@@ -232,13 +226,7 @@ func computeHydrate(s *Store, sessionID string) (hydrateResult, error) {
 			}
 			continue
 		}
-
-		// No events surfaced. Could be a meta line we want to fold,
-		// or a filtered side-band / isMeta line — metaFromLine
-		// returns false for the latter.
-		if mu, ok, _ := metaFromLine(buf); ok {
-			applyMetaUpdate(&res.meta, mu)
-		}
+		applyMetaLine(buf, &res.meta)
 	}
 	if err := sc.Err(); err != nil {
 		return hydrateResult{}, fmt.Errorf("sessions: hydrate %s: scan %s: %w", sessionID, sess.Path, err)

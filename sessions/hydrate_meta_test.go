@@ -34,8 +34,8 @@ const hydrateMetaFixture = `{"type":"user","uuid":"u-1","parentUuid":null,"sessi
 `
 
 // hydrateMetaWantMeta is the SessionMeta the fixture above should yield.
-// Last-write-wins on LastPrompt and PermissionMode: "the latest prompt"
-// and "auto" win over their earlier values.
+// LastPrompt and PermissionMode reflect the *second* occurrence in the
+// fixture (last-write-wins).
 var hydrateMetaWantMeta = SessionMeta{
 	LastPrompt:     "the latest prompt",
 	AITitle:        "Final AI title",
@@ -62,7 +62,7 @@ var hydrateMetaWantMeta = SessionMeta{
 	},
 }
 
-func TestHydrate_Meta_PopulatedAllFields(t *testing.T) {
+func TestHydrate_Meta(t *testing.T) {
 	root, id, _ := writeHydrateFixture(t, "-work-m", "hydrate-meta", hydrateMetaFixture)
 	store := openWith(t, root)
 
@@ -74,49 +74,20 @@ func TestHydrate_Meta_PopulatedAllFields(t *testing.T) {
 		t.Fatalf("Hydrate: %v", err)
 	}
 
-	if !reflect.DeepEqual(sess.Meta, hydrateMetaWantMeta) {
-		t.Errorf("Meta=%+v\nwant   %+v", sess.Meta, hydrateMetaWantMeta)
-	}
-}
+	t.Run("all fields populated with last-write-wins", func(t *testing.T) {
+		if !reflect.DeepEqual(sess.Meta, hydrateMetaWantMeta) {
+			t.Errorf("Meta=%+v\nwant   %+v", sess.Meta, hydrateMetaWantMeta)
+		}
+	})
 
-func TestHydrate_Meta_LastWriteWins(t *testing.T) {
-	root, id, _ := writeHydrateFixture(t, "-work-m", "hydrate-meta", hydrateMetaFixture)
-	store := openWith(t, root)
-
-	sess, err := store.Session(id)
-	if err != nil {
-		t.Fatalf("Session: %v", err)
-	}
-	if err := store.Hydrate(sess); err != nil {
-		t.Fatalf("Hydrate: %v", err)
-	}
-
-	if got, want := sess.Meta.LastPrompt, "the latest prompt"; got != want {
-		t.Errorf("LastPrompt=%q, want %q (earlier value leaked)", got, want)
-	}
-	if got, want := sess.Meta.PermissionMode, "auto"; got != want {
-		t.Errorf("PermissionMode=%q, want %q (earlier value leaked)", got, want)
-	}
-}
-
-func TestHydrate_Meta_NotInEventCount(t *testing.T) {
-	root, id, _ := writeHydrateFixture(t, "-work-m", "hydrate-meta", hydrateMetaFixture)
-	store := openWith(t, root)
-
-	sess, err := store.Session(id)
-	if err != nil {
-		t.Fatalf("Session: %v", err)
-	}
-	if err := store.Hydrate(sess); err != nil {
-		t.Fatalf("Hydrate: %v", err)
-	}
-
-	// Only the two real conversation lines (u-1 user, a-1 assistant) are
-	// events. The isMeta:true user line, all meta lines, the
-	// file-history-snapshot line, and the unknown type must not count.
-	if got, want := sess.EventCount, 2; got != want {
-		t.Errorf("EventCount=%d, want %d (meta lines leaked into events)", got, want)
-	}
+	// Only the two real conversation lines (u-1 user, a-1 assistant)
+	// are events. Meta lines, file-history-snapshot, the unknown type,
+	// and the isMeta:true synthetic user line must not count.
+	t.Run("meta lines not in EventCount", func(t *testing.T) {
+		if got, want := sess.EventCount, 2; got != want {
+			t.Errorf("EventCount=%d, want %d (meta lines leaked into events)", got, want)
+		}
+	})
 }
 
 // hydrateNoMetaFixture has conversation but zero meta lines.
@@ -143,7 +114,7 @@ func TestHydrate_Meta_ZeroWhenAbsent(t *testing.T) {
 }
 
 func TestHydrate_Meta_EventsContractUnchanged(t *testing.T) {
-	// Events() must still hide every meta line. We sanity-check this on
+	// Events() must still hide every meta line. Sanity-check this on
 	// the meta fixture by confirming Events surfaces exactly the two
 	// conversation events (the isMeta:true user line is also hidden).
 	root, id, _ := writeHydrateFixture(t, "-work-m", "hydrate-meta", hydrateMetaFixture)
