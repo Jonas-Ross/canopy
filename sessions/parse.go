@@ -48,16 +48,27 @@ var (
 
 // Canonical field-search patterns for jsonStringField. Hoisted to
 // package scope so the byte slice itself is allocated once per process.
+//
+// Each field is uniquely scoped enough that bytes.Index returning the
+// first occurrence is the correct answer:
+//   - uuid, timestamp, cwd: only ever appear at the JSONL object's top
+//     level on conv lines (parentUuid has a different prefix; tool
+//     inputs do not embed these keys at depth ≥ 2 in canonical CLI
+//     output).
+//   - model: only appears inside the assistant message envelope, which
+//     is itself unique to assistant lines.
+//
+// Type detection deliberately does NOT use jsonStringField — content
+// blocks have their own `"type":"text"` / `"type":"tool_use"` keys, and
+// Go's json.Encoder alphabetizes keys (sorting `"type":"text"` inside
+// `content` before the top-level `"type":"assistant"`). Use the
+// value-included pre-filter patterns above instead.
 var (
-	typePat      = []byte(`"type":"`)
-	uuidPat      = []byte(`"uuid":"`)
-	timestampPat = []byte(`"timestamp":"`)
-	cwdPat       = []byte(`"cwd":"`)
-	modelPat     = []byte(`"model":"`)
-
-	userTypeBytes      = []byte("user")
-	assistantTypeBytes = []byte("assistant")
-	syntheticBytes     = []byte("<synthetic>")
+	uuidPat        = []byte(`"uuid":"`)
+	timestampPat   = []byte(`"timestamp":"`)
+	cwdPat         = []byte(`"cwd":"`)
+	modelPat       = []byte(`"model":"`)
+	syntheticBytes = []byte("<synthetic>")
 )
 
 // extractedMeta is what the Open-time scan pulls out of one JSONL file.
@@ -114,26 +125,20 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 		if len(line) == 0 {
 			continue
 		}
-		// Fast path: skip lines that cannot be conversation events
-		// without any further parsing. The vast majority of lines in
-		// real ~/.claude/projects files are meta / side-band
-		// (queue-operation, system, attachment, file-history-snapshot,
-		// permission-mode, …) and fall here.
-		if !bytes.Contains(line, typeTagUser) && !bytes.Contains(line, typeTagAssistant) {
-			continue
-		}
-
-		typeBytes, ok := jsonStringField(line, typePat)
-		if !ok {
-			continue
-		}
-		isUser := bytes.Equal(typeBytes, userTypeBytes)
-		isAssistant := bytes.Equal(typeBytes, assistantTypeBytes)
+		// Fast path: detect conversation events by full-value substring
+		// match. The pre-filter is ALSO the type classifier — it carries
+		// the value bytes ("user" / "assistant") in the pattern itself,
+		// which is robust to JSON key ordering AND to nested objects
+		// that have their own `"type":"X"` keys (content blocks use
+		// `"type":"text"`, `"type":"tool_use"`, etc.; none of those
+		// values match our patterns).
+		//
+		// The vast majority of lines in real ~/.claude/projects files
+		// are meta / side-band (queue-operation, system, attachment,
+		// file-history-snapshot, permission-mode, …) and bail here.
+		isAssistant := bytes.Contains(line, typeTagAssistant)
+		isUser := !isAssistant && bytes.Contains(line, typeTagUser)
 		if !isUser && !isAssistant {
-			// Pre-filter false positive (e.g. a substring match on a
-			// non-conv line whose payload literally contained
-			// `"type":"user"` somewhere we couldn't detect with the
-			// canonical-JSON assumption).
 			continue
 		}
 

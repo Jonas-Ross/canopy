@@ -313,6 +313,36 @@ func TestScanFileMeta_ParentUuidDoesNotMaskUuid(t *testing.T) {
 	}
 }
 
+// TestScanFileMeta_AlphabetizedKeysWithNestedType pins that an
+// assistant line serialized by Go's json.Encoder (which alphabetizes
+// keys, so nested content-block `"type":"text"` literally precedes the
+// top-level `"type":"assistant"` in the byte stream) is still
+// classified as assistant and yields the model from the message
+// envelope. internal/demo's fixture uses json.Encoder, so this is the
+// shape that broke without the pre-filter-as-classifier rule.
+func TestScanFileMeta_AlphabetizedKeysWithNestedType(t *testing.T) {
+	body := joinLines(
+		// Alphabetized order: cwd, message, sessionId, timestamp, type, uuid.
+		// Crucially, message.content holds a content block with
+		// "type":"text" — that nested `"type":"` appears in the byte
+		// stream BEFORE the top-level `"type":"assistant"`.
+		`{"cwd":"/demo","message":{"content":[{"text":"hi","type":"text"}],"id":"msg_01","model":"claude-opus-4-7","role":"assistant"},"sessionId":"s","timestamp":"2026-01-01T00:00:00.000Z","type":"assistant","uuid":"a1"}`,
+	)
+	got, err := scanFileMeta(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("scanFileMeta: %v", err)
+	}
+	if !got.hasAnyConvLine {
+		t.Fatalf("hasAnyConvLine = false, want true (classified as non-conv?)")
+	}
+	if got.firstCwd != "/demo" {
+		t.Errorf("firstCwd = %q, want /demo", got.firstCwd)
+	}
+	if got.model != "claude-opus-4-7" {
+		t.Errorf("model = %q, want claude-opus-4-7", got.model)
+	}
+}
+
 // TestScanFileMeta_EscapedQuotesInContent pins that a tool-result whose
 // content payload contains the LITERAL bytes `"uuid":"..."` (after
 // JSON-encoding, those `"` become `\"`) doesn't trick the extractor
