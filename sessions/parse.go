@@ -9,12 +9,37 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
 // maxScanLineSize is the buffer ceiling for bufio.Scanner. Some real
 // JSONL lines (attachments, large tool inputs/outputs) are multi-MB.
 const maxScanLineSize = 10 * 1024 * 1024
+
+// initScanBufSize is the starting capacity for each pooled Scanner
+// buffer. bufio.Scanner will grow past this when a single line exceeds
+// the current buffer, up to maxScanLineSize.
+const initScanBufSize = 64 * 1024
+
+// retainedScanBufCap caps the capacity we keep when returning a buffer
+// to scanBufPool. Without this, a single file with a multi-MB line would
+// permanently bloat every pooled buffer. 256 KB is large enough to hold
+// the vast majority of conversation lines without re-growing, and small
+// enough that holding 18+ in the pool (one per cpu, worst case) stays
+// well below the original 64 KB × 532-file baseline footprint.
+const retainedScanBufCap = 256 * 1024
+
+// scanBufPool reuses bufio.Scanner backing arrays across scanFileMeta
+// calls. Without it, Open allocates a fresh 64 KB buffer per JSONL file
+// (532 × 64 KB ≈ 34 MB per Open on the user's tree, plus the growth
+// each time a multi-KB line forces an expand).
+var scanBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, initScanBufSize)
+		return &b
+	},
+}
 
 // Canonical type-tag bytes used to short-circuit non-conversation lines
 // before json.Unmarshal. Relies on the Claude CLI's canonical JSON
@@ -77,8 +102,20 @@ type extractedMeta struct {
 func scanFileMeta(r io.Reader) (extractedMeta, error) {
 	var m extractedMeta
 
+	bufPtr := scanBufPool.Get().(*[]byte)
+	defer func() {
+		buf := (*bufPtr)[:0]
+		if cap(buf) > retainedScanBufCap {
+			// Don't keep multi-MB buffers in the pool — a single
+			// outlier file would inflate every subsequent borrower.
+			buf = make([]byte, 0, initScanBufSize)
+		}
+		*bufPtr = buf
+		scanBufPool.Put(bufPtr)
+	}()
+
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), maxScanLineSize)
+	sc.Buffer(*bufPtr, maxScanLineSize)
 
 	var firstCwd, firstTimestamp, lastCwd string
 	gotFirst := false
