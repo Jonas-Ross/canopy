@@ -80,6 +80,12 @@ func withDefaults(cfg Config) Config {
 	return cfg
 }
 
+// maxParallelStatus bounds the fan-out of worktreeStatus calls in
+// statusesParallel. Each WorktreeStatus shells out 4 git subprocesses;
+// 16 keeps even a 100-worktree refresh well under a second without
+// flooding the OS process table on a typical workstation.
+const maxParallelStatus = 16
+
 // visit is one (repo, worktree) tuple captured during walkAll, used to
 // defer buildState calls until after a single batched procs snapshot
 // has been taken across every worktree in the walk.
@@ -89,6 +95,43 @@ type visit struct {
 	siblings []string
 	prs      []pr.PR
 	prStale  bool
+}
+
+// statusesParallel fans out worktreeStatus across paths with a bounded
+// semaphore. Returns a map keyed by path; absent entries indicate the
+// per-path call failed and the caller should fall back to the
+// identity-only Worktree (matches the prior serial soft-degrade in
+// buildState).
+func (a *Aggregator) statusesParallel(ctx context.Context, paths []string) map[string]git.Worktree {
+	out := make(map[string]git.Worktree, len(paths))
+	if len(paths) == 0 {
+		return out
+	}
+	type result struct {
+		path string
+		wt   git.Worktree
+		ok   bool
+	}
+	results := make([]result, len(paths))
+	sem := make(chan struct{}, maxParallelStatus)
+	var wg sync.WaitGroup
+	for i, p := range paths {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, p string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			wt, err := a.cfg.worktreeStatus(ctx, p)
+			results[i] = result{path: p, wt: wt, ok: err == nil}
+		}(i, p)
+	}
+	wg.Wait()
+	for _, r := range results {
+		if r.ok {
+			out[r.path] = r.wt
+		}
+	}
+	return out
 }
 
 // Snapshot returns the current state of every worktree across all
@@ -106,10 +149,12 @@ func (a *Aggregator) Snapshot(ctx context.Context) ([]WorktreeState, error) {
 	if err != nil {
 		return nil, err
 	}
-	procsByPrefix := a.procsSnapshot(ctx, visitPrefixes(visits))
+	prefixes := visitPrefixes(visits)
+	procsByPrefix := a.procsSnapshot(ctx, prefixes)
+	statusByPath := a.statusesParallel(ctx, prefixes)
 	out := make([]WorktreeState, 0, len(visits))
 	for _, v := range visits {
-		out = append(out, a.buildState(ctx, v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix))
+		out = append(out, a.buildState(ctx, v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix, statusByPath))
 	}
 	return out, nil
 }
@@ -174,8 +219,10 @@ func (a *Aggregator) procsSnapshot(ctx context.Context, prefixes []string) map[s
 // the list of every worktree path in the same repo — used to attribute a
 // prefix-matched session or process to the deepest containing worktree
 // (e.g. a session under /repo/.worktrees/feat must NOT also appear under
-// /repo).
-func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree, siblings []string, prList []pr.PR, prStale bool, procsByPrefix map[string][]procs.Process) WorktreeState {
+// /repo). statusByPath holds pre-fetched WorktreeStatus results keyed by
+// worktree path; absent entries (per-path fetch failure) cause buildState
+// to fall back to the identity-only Worktree from ListWorktrees.
+func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree, siblings []string, prList []pr.PR, prStale bool, procsByPrefix map[string][]procs.Process, statusByPath map[string]git.Worktree) WorktreeState {
 	state := WorktreeState{
 		Repo:      repo,
 		Worktree:  wt,
@@ -183,7 +230,7 @@ func (a *Aggregator) buildState(ctx context.Context, repo Repo, wt git.Worktree,
 		Procs:     []procs.Process{},
 	}
 
-	if full, err := a.cfg.worktreeStatus(ctx, wt.Path); err == nil {
+	if full, ok := statusByPath[wt.Path]; ok {
 		// WorktreeStatus does not surface the identity flags that
 		// ListWorktrees sets from porcelain output.
 		full.Bare = wt.Bare

@@ -173,12 +173,14 @@ func (a *Aggregator) refreshAll(
 			a.observePRErr(repoRoot, err, subscribers, prErrs, broadcast)
 		},
 	)
-	procsByPrefix := a.procsSnapshot(ctx, visitPrefixes(visits))
+	prefixes := visitPrefixes(visits)
+	procsByPrefix := a.procsSnapshot(ctx, prefixes)
+	statusByPath := a.statusesParallel(ctx, prefixes)
 	seen := make(map[string]struct{}, len(visits))
 	for _, v := range visits {
 		seen[v.wt.Path] = struct{}{}
 		pathToRepo[v.wt.Path] = v.repo
-		next := a.buildState(ctx, v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix)
+		next := a.buildState(ctx, v.repo, v.wt, v.siblings, v.prs, v.prStale, procsByPrefix, statusByPath)
 		prev, had := state[v.wt.Path]
 		state[v.wt.Path] = next
 		if broadcast && (!had || !worktreeStatesEqual(prev, next)) {
@@ -231,7 +233,8 @@ func (a *Aggregator) refreshOne(
 	a.observePRErr(repo.Root, prErr, subscribers, prErrs, true)
 	siblings := siblingPaths(pathToRepo, repo)
 	procsByPrefix := a.procsSnapshot(ctx, []string{path})
-	next := a.buildState(ctx, repo, full, siblings, prList, prStale, procsByPrefix)
+	statusByPath := map[string]git.Worktree{path: full}
+	next := a.buildState(ctx, repo, full, siblings, prList, prStale, procsByPrefix, statusByPath)
 	state[path] = next
 	if !had || !worktreeStatesEqual(prev, next) {
 		a.broadcast(subscribers, Update{Worktree: path, State: next})
