@@ -27,9 +27,11 @@ var (
 	typeTagAssistant = []byte(`"type":"assistant"`)
 )
 
-// rawLine is a minimal projection of a JSONL line. Only fields needed
-// for the Open-time first/last conversation event extraction are
-// decoded. The rest of the JSON object is ignored.
+// rawLine is the full projection of a JSONL line used until the first
+// non-synthetic assistant model has been captured. Message is decoded
+// as RawMessage so we can extract the model from the assistant
+// envelope; after that point scanFileMeta switches to rawLineLean to
+// skip the per-line RawMessage byte-copy.
 type rawLine struct {
 	Type      string          `json:"type"`
 	UUID      string          `json:"uuid"`
@@ -38,21 +40,21 @@ type rawLine struct {
 	Message   json.RawMessage `json:"message"`
 }
 
+// rawLineLean drops Message. Used after model capture; relies on
+// json.Unmarshal silently ignoring unknown fields, which means the
+// (potentially multi-MB) "message" payload is never copied into a
+// json.RawMessage slice.
+type rawLineLean struct {
+	Type      string `json:"type"`
+	UUID      string `json:"uuid"`
+	Timestamp string `json:"timestamp"`
+	Cwd       string `json:"cwd"`
+}
+
 // rawMessage projects the assistant message envelope used for first
 // non-synthetic model extraction.
 type rawMessage struct {
 	Model string `json:"model"`
-}
-
-// isConversationEvent reports whether a raw line counts as a
-// conversation event for indexing purposes. A line is a "conversation
-// event" if its top-level type is "user" or "assistant" and it has a
-// non-empty UUID (meta lines lack uuids per docs/jsonl-schema.md §3).
-func isConversationEvent(r *rawLine) bool {
-	if r.UUID == "" {
-		return false
-	}
-	return r.Type == "user" || r.Type == "assistant"
 }
 
 // extractedMeta is what the Open-time scan pulls out of one JSONL file.
@@ -78,7 +80,7 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxScanLineSize)
 
-	var first, last rawLine
+	var firstCwd, firstTimestamp, lastCwd string
 	gotFirst := false
 
 	for sc.Scan() {
@@ -94,36 +96,52 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 		// event. Safe because the CLI emits canonical JSON; if a
 		// non-conv line ever contains `"type":"user"` as a substring
 		// (e.g. inside a stringified tool result), we fall through and
-		// the downstream type check still rejects it. Falls back to
-		// full parse for lines that look conv-ish.
+		// the downstream type check still rejects it.
 		if !bytes.Contains(line, typeTagUser) && !bytes.Contains(line, typeTagAssistant) {
 			continue
 		}
-		var raw rawLine
-		if err := json.Unmarshal(line, &raw); err != nil {
-			// malformed line — skip; Open() is a best-effort indexer
-			continue
-		}
 
-		// First non-synthetic assistant model wins.
-		if m.model == "" && raw.Type == "assistant" && len(raw.Message) > 0 {
-			var rm rawMessage
-			if err := json.Unmarshal(raw.Message, &rm); err == nil {
-				if rm.Model != "" && rm.Model != "<synthetic>" {
-					m.model = rm.Model
+		var typeStr, uuidStr, timestampStr, cwdStr string
+
+		if m.model == "" {
+			// Full decode while we still need the assistant message
+			// envelope to extract the first non-<synthetic> model.
+			var raw rawLine
+			if err := json.Unmarshal(line, &raw); err != nil {
+				continue
+			}
+			if raw.Type == "assistant" && len(raw.Message) > 0 {
+				var rm rawMessage
+				if err := json.Unmarshal(raw.Message, &rm); err == nil {
+					if rm.Model != "" && rm.Model != "<synthetic>" {
+						m.model = rm.Model
+					}
 				}
 			}
+			typeStr, uuidStr, timestampStr, cwdStr = raw.Type, raw.UUID, raw.Timestamp, raw.Cwd
+		} else {
+			// Lean decode — `message` is no longer in the struct, so
+			// json.Unmarshal skips its (potentially multi-MB) bytes
+			// instead of copying them into a json.RawMessage.
+			var raw rawLineLean
+			if err := json.Unmarshal(line, &raw); err != nil {
+				continue
+			}
+			typeStr, uuidStr, timestampStr, cwdStr = raw.Type, raw.UUID, raw.Timestamp, raw.Cwd
 		}
 
-		if !isConversationEvent(&raw) {
+		// Conversation event = uuid present (meta lines lack uuids per
+		// docs/jsonl-schema.md §3) and type ∈ {user, assistant}.
+		if uuidStr == "" || (typeStr != "user" && typeStr != "assistant") {
 			continue
 		}
 
 		if !gotFirst {
-			first = raw
+			firstCwd = cwdStr
+			firstTimestamp = timestampStr
 			gotFirst = true
 		}
-		last = raw
+		lastCwd = cwdStr
 	}
 	if err := sc.Err(); err != nil {
 		return m, fmt.Errorf("scan: %w", err)
@@ -134,9 +152,9 @@ func scanFileMeta(r io.Reader) (extractedMeta, error) {
 	}
 
 	m.hasAnyConvLine = true
-	m.firstCwd = first.Cwd
-	m.lastCwd = last.Cwd
-	if t, err := parseTimestamp(first.Timestamp); err == nil {
+	m.firstCwd = firstCwd
+	m.lastCwd = lastCwd
+	if t, err := parseTimestamp(firstTimestamp); err == nil {
 		m.startedAt = t
 	}
 	return m, nil
