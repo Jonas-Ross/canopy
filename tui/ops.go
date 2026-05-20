@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -151,17 +152,20 @@ func (m Model) startPrune() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func removeWorktreeCmd(path string) tea.Cmd {
+// removeWorktreeCmd takes the caller's ctx so that q-during-prune cancels
+// the underlying `git worktree remove` subprocess. We layer a 10s deadline
+// on top to keep a slow filesystem from hanging the modal indefinitely.
+func removeWorktreeCmd(ctx context.Context, path string) tea.Cmd {
 	return func() tea.Msg {
 		if isDemoMode() {
 			return worktreeRemovedMsg{path: path}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		c := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", "--", path)
 		out, err := c.CombinedOutput()
 		if err != nil {
-			return worktreeRemovedMsg{path: path, err: fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))}
+			return worktreeRemovedMsg{path: path, err: cleanExecErr(err, out)}
 		}
 		return worktreeRemovedMsg{path: path}
 	}
@@ -197,13 +201,13 @@ func killProcsCmd(pids []int, expectedCwd string) tea.Cmd {
 			p, err := os.FindProcess(pid)
 			if err != nil {
 				if firstErr == nil {
-					firstErr = err
+					firstErr = wrapKillSignalError(pid, err)
 				}
 				continue
 			}
 			if err := p.Signal(syscall.SIGTERM); err != nil {
 				if firstErr == nil {
-					firstErr = err
+					firstErr = wrapKillSignalError(pid, err)
 				}
 				continue
 			}
@@ -263,7 +267,7 @@ func (m Model) updateNewWorktreeForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.mode = modeNormal
 		m.newBranchInput.Blur()
 		m.newBaseInput.Blur()
-		return m, createWorktreeCmd(m.repoRoot, branch, base)
+		return m, createWorktreeCmd(m.runCtx, m.repoRoot, branch, base)
 	}
 
 	var cmd tea.Cmd
@@ -317,7 +321,10 @@ func validBranchOrBaseName(s string) bool {
 	return true
 }
 
-func createWorktreeCmd(repoRoot, branch, base string) tea.Cmd {
+// createWorktreeCmd takes the caller's ctx so that q-during-create cancels
+// the underlying `git worktree add` subprocess. The 15s timeout is layered
+// on top of the caller ctx — first to fire wins.
+func createWorktreeCmd(ctx context.Context, repoRoot, branch, base string) tea.Cmd {
 	return func() tea.Msg {
 		if repoRoot == "" {
 			return worktreeCreatedMsg{branch: branch, err: fmt.Errorf("repo root unknown")}
@@ -335,15 +342,36 @@ func createWorktreeCmd(repoRoot, branch, base string) tea.Cmd {
 		if err := os.MkdirAll(worktreeBaseDir(repoRoot), 0o755); err != nil {
 			return worktreeCreatedMsg{branch: branch, err: err}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		// `--` separates options from positional args so a path that
 		// somehow starts with '-' can never be parsed as a flag.
 		c := exec.CommandContext(ctx, "git", "-C", repoRoot, "worktree", "add", "-b", branch, "--", path, base)
 		out, err := c.CombinedOutput()
 		if err != nil {
-			return worktreeCreatedMsg{branch: branch, path: path, err: fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))}
+			return worktreeCreatedMsg{branch: branch, path: path, err: cleanExecErr(err, out)}
 		}
 		return worktreeCreatedMsg{branch: branch, path: path}
 	}
+}
+
+// cleanExecErr drops the noisy "exit status N:" prefix that exec.ExitError
+// stringifies to, in favor of the command's own stderr tail. When stderr
+// is empty (a rare hard-fail before the program wrote anything) the
+// original error is preserved so the caller still sees *something*.
+// Shared between the worktree-op cmds in this file and runCapturingStderr
+// in newtab.go.
+func cleanExecErr(err error, output []byte) error {
+	tail := strings.TrimSpace(string(output))
+	if tail == "" {
+		return err
+	}
+	return errors.New(tail)
+}
+
+// wrapKillSignalError annotates a SIGTERM failure with the offending PID so
+// the partial-failure notice points at which process actually refused the
+// signal. %w keeps the inner error unwrappable for callers that need it.
+func wrapKillSignalError(pid int, err error) error {
+	return fmt.Errorf("pid %d: %w", pid, err)
 }

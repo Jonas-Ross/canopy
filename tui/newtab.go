@@ -137,10 +137,7 @@ func runCapturingStderr(c *exec.Cmd) error {
 	c.Stdout = io.Discard
 	c.Stderr = &stderr
 	if err := c.Run(); err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return fmt.Errorf("%s", msg)
-		}
-		return err
+		return cleanExecErr(err, stderr.Bytes())
 	}
 	return nil
 }

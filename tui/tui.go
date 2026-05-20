@@ -30,6 +30,15 @@ const pulseDuration = 600 * time.Millisecond
 type Model struct {
 	refresher Refresher
 
+	// runCtx is the bubbletea-level lifecycle ctx, threaded through to the
+	// op cmd factories (e.g. removeWorktreeCmd) so that quit-mid-operation
+	// cancels the subprocess. NewModel defaults to context.Background();
+	// Run overrides it before tea.NewProgram. Stored on the struct (against
+	// the general "don't put contexts in structs" guidance / staticcheck
+	// SA1029) because tea.Cmd factories run from inside Update, which has
+	// no other way to reach the run-level ctx.
+	runCtx context.Context
+
 	repo     string
 	repoRoot string
 
@@ -60,12 +69,15 @@ type Model struct {
 	now func() time.Time
 }
 
-// NewModel constructs the root Model with the given Refresher.
+// NewModel constructs the root Model with the given Refresher. runCtx
+// defaults to context.Background() so tests can construct a Model without
+// caring about lifecycle plumbing; Run injects the real ctx in production.
 func NewModel(r Refresher) tea.Model {
 	ti := textinput.New()
 	ti.Prompt = filterPrompt
 	return Model{
 		refresher:     r,
+		runCtx:        context.Background(),
 		width:         80,
 		states:        make(map[string]aggregator.WorktreeState),
 		procsExpanded: make(map[string]bool),
@@ -313,7 +325,7 @@ func (m Model) confirmKey(msg tea.KeyMsg, onYes func(Model, aggregator.WorktreeS
 func (m Model) updateConfirmPrune(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	next, cmd := m.confirmKey(msg, func(m Model, state aggregator.WorktreeState) (Model, tea.Cmd) {
 		m.notice = noticeStyle.Render("pruning " + FormatBranch(state.Worktree.Branch, state.Worktree.Detached) + "…")
-		return m, removeWorktreeCmd(state.Worktree.Path)
+		return m, removeWorktreeCmd(m.runCtx, state.Worktree.Path)
 	})
 	return next, cmd
 }
@@ -567,7 +579,8 @@ func Run(ctx context.Context, agg *aggregator.Aggregator) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	m := NewModel(agg)
+	m := NewModel(agg).(Model)
+	m.runCtx = ctx
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	ch := agg.Subscribe(ctx)
