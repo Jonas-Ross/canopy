@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -490,5 +491,372 @@ func TestDecodeTailLine_SessionIDFallback(t *testing.T) {
 				t.Errorf("SessionID=%q want %q", ev.SessionID, tc.want)
 			}
 		})
+	}
+}
+
+// --- checkpoint tests (issue #12) ---
+
+// drainCh reads everything currently buffered on ch within d. Used to
+// empty the live channel between checkpoint test phases without asserting
+// on every individual item.
+func drainCh(ch <-chan TailItem, d time.Duration) []TailItem {
+	var out []TailItem
+	deadline := time.NewTimer(d)
+	defer deadline.Stop()
+	for {
+		select {
+		case it, ok := <-ch:
+			if !ok {
+				return out
+			}
+			out = append(out, it)
+		case <-deadline.C:
+			return out
+		}
+	}
+}
+
+// startTailCheckpoint opens a Store and starts Tail with a checkpoint
+// path. Returns the Store, channel, and cancel func. Cleanup waits for
+// the tail goroutine to fully drain the channel before returning so the
+// final checkpoint write completes before any t.TempDir() teardown
+// races it (the goroutine's defer flushCheckpoint runs before the
+// channel close).
+func startTailCheckpoint(t *testing.T, root, ckpt string) (*Store, <-chan TailItem, context.CancelFunc) {
+	t.Helper()
+	store, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := store.Tail(ctx, TailWithCheckpoint(ckpt))
+	if err != nil {
+		cancel()
+		_ = store.Close()
+		t.Fatalf("Tail: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		for range ch {
+		}
+		_ = store.Close()
+	})
+	return store, ch, cancel
+}
+
+func TestTail_CheckpointResumesAfterRestart(t *testing.T) {
+	root, _, jsonlPath := newTailTree(t)
+	ckpt := filepath.Join(t.TempDir(), "tail-offsets.json")
+	sid := "tail0001-0000-0000-0000-000000000001"
+
+	// Phase 1: start Tail with a checkpoint, append one line, drain it,
+	// cancel. The offset for jsonlPath should land in the checkpoint
+	// file on teardown.
+	store1, ch1, cancel1 := startTailCheckpoint(t, root, ckpt)
+	appendLine(t, jsonlPath, userLine("u1", "seed-uuid", sid, "phase1"))
+	got := drainCh(ch1, 2*time.Second)
+	if len(got) == 0 {
+		t.Fatalf("phase1: no events drained")
+	}
+	cancel1()
+	_ = store1.Close()
+	// Give the teardown a moment to flush.
+	if !waitFor(2*time.Second, 20*time.Millisecond, func() bool {
+		_, err := os.Stat(ckpt)
+		return err == nil
+	}) {
+		t.Fatalf("phase1: checkpoint file never created at %s", ckpt)
+	}
+
+	// Phase 2: append a NEW line while "offline".
+	appendLine(t, jsonlPath, userLine("u-missed", "u1", sid, "offline"))
+
+	// Phase 3: start a second Tail. The "offline" event must arrive.
+	_, ch2, _ := startTailCheckpoint(t, root, ckpt)
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case it, ok := <-ch2:
+			if !ok {
+				t.Fatal("phase3: channel closed before missed event")
+			}
+			if it.Err != nil {
+				t.Fatalf("phase3: unexpected err: %v", it.Err)
+			}
+			if it.Event.UUID == "u-missed" {
+				if it.Event.User == nil || it.Event.User.Text != "offline" {
+					t.Errorf("phase3: User=%v want text=offline", it.Event.User)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("phase3: missed event never arrived after restart")
+		}
+	}
+}
+
+func TestTail_CheckpointPreservesOrder(t *testing.T) {
+	root, _, jsonlPath := newTailTree(t)
+	ckpt := filepath.Join(t.TempDir(), "tail-offsets.json")
+	sid := "tail0001-0000-0000-0000-000000000001"
+
+	store1, ch1, cancel1 := startTailCheckpoint(t, root, ckpt)
+	appendLine(t, jsonlPath, userLine("u1", "seed-uuid", sid, "live"))
+	_ = drainCh(ch1, 2*time.Second)
+	cancel1()
+	_ = store1.Close()
+	if !waitFor(2*time.Second, 20*time.Millisecond, func() bool {
+		_, err := os.Stat(ckpt)
+		return err == nil
+	}) {
+		t.Fatalf("checkpoint not written")
+	}
+
+	// Append three offline events in order.
+	appendLine(t, jsonlPath, userLine("ua", "u1", sid, "a"))
+	appendLine(t, jsonlPath, userLine("ub", "ua", sid, "b"))
+	appendLine(t, jsonlPath, userLine("uc", "ub", sid, "c"))
+
+	_, ch2, _ := startTailCheckpoint(t, root, ckpt)
+	var seen []string
+	deadline := time.After(3 * time.Second)
+	for len(seen) < 3 {
+		select {
+		case it, ok := <-ch2:
+			if !ok {
+				t.Fatalf("channel closed early; seen=%v", seen)
+			}
+			if it.Err != nil {
+				t.Fatalf("unexpected err: %v", it.Err)
+			}
+			switch it.Event.UUID {
+			case "ua", "ub", "uc":
+				seen = append(seen, it.Event.UUID)
+			}
+		case <-deadline:
+			t.Fatalf("timed out; seen=%v", seen)
+		}
+	}
+	want := []string{"ua", "ub", "uc"}
+	for i, u := range want {
+		if seen[i] != u {
+			t.Fatalf("order mismatch: seen=%v want=%v", seen, want)
+		}
+	}
+}
+
+func TestTail_CorruptCheckpointFallsBackToEOF(t *testing.T) {
+	root, _, jsonlPath := newTailTree(t)
+	ckpt := filepath.Join(t.TempDir(), "tail-offsets.json")
+	sid := "tail0001-0000-0000-0000-000000000001"
+
+	// Write garbage into the checkpoint location.
+	if err := os.WriteFile(ckpt, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatalf("seed bad ckpt: %v", err)
+	}
+
+	// Append "offline" data BEFORE Tail starts. Because the checkpoint
+	// is corrupt, the implementation must fall back to current-EOF
+	// seeding and these lines must NOT arrive.
+	appendLine(t, jsonlPath, userLine("u-pre", "seed-uuid", sid, "pre"))
+
+	_, ch, _ := startTailCheckpoint(t, root, ckpt)
+
+	// Now append a fresh line — this one should arrive.
+	appendLine(t, jsonlPath, userLine("u-post", "u-pre", sid, "post"))
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case it, ok := <-ch:
+			if !ok {
+				t.Fatal("channel closed early")
+			}
+			if it.Err != nil {
+				t.Fatalf("unexpected err: %v", it.Err)
+			}
+			if it.Event.UUID == "u-pre" {
+				t.Fatal("pre-Tail event leaked through despite corrupt checkpoint (fallback to EOF was not honored)")
+			}
+			if it.Event.UUID == "u-post" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("post-Tail event never arrived")
+		}
+	}
+}
+
+func TestTail_CheckpointMissingFileTreatedAsFresh(t *testing.T) {
+	root, _, jsonlPath := newTailTree(t)
+	ckpt := filepath.Join(t.TempDir(), "does", "not", "exist", "tail-offsets.json")
+	sid := "tail0001-0000-0000-0000-000000000001"
+
+	store, ch, cancel := startTailCheckpoint(t, root, ckpt)
+
+	// Behaves like the no-checkpoint case: pre-existing seed line is not
+	// replayed; new appends do flow through.
+	appendLine(t, jsonlPath, userLine("u-new", "seed-uuid", sid, "new"))
+
+	select {
+	case it := <-ch:
+		if it.Err != nil {
+			t.Fatalf("unexpected err: %v", it.Err)
+		}
+		if it.Event.UUID != "u-new" {
+			t.Fatalf("UUID=%q want u-new", it.Event.UUID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no event within 3s")
+	}
+
+	// Teardown should create the file (and its parent dirs).
+	cancel()
+	_ = store.Close()
+	if !waitFor(2*time.Second, 20*time.Millisecond, func() bool {
+		_, err := os.Stat(ckpt)
+		return err == nil
+	}) {
+		t.Fatalf("checkpoint not created at %s", ckpt)
+	}
+}
+
+func TestTail_CheckpointWriteIsAtomic(t *testing.T) {
+	root, _, jsonlPath := newTailTree(t)
+	ckpt := filepath.Join(t.TempDir(), "tail-offsets.json")
+	sid := "tail0001-0000-0000-0000-000000000001"
+
+	_, ch, _ := startTailCheckpoint(t, root, ckpt)
+
+	// Drive a tight write loop on the producer side while a reader
+	// loop hammers the checkpoint file. Any half-written observation
+	// would surface as a JSON parse error.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			appendLine(t, jsonlPath, userLine(fmt.Sprintf("uatom%04d", i), "seed-uuid", sid, "x"))
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+	// Drain channel so the producer doesn't get stuck on full-buffer
+	// drops; that's not what this test is about.
+	go func() {
+		for range ch {
+		}
+	}()
+
+	readDeadline := time.After(3 * time.Second)
+	for {
+		select {
+		case <-readDeadline:
+			return
+		case <-done:
+			return
+		default:
+		}
+		data, err := os.ReadFile(ckpt)
+		if err != nil {
+			// File may not exist yet on first iteration; that's OK.
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		if len(data) == 0 {
+			continue
+		}
+		var m map[string]int64
+		if err := json.Unmarshal(data, &m); err != nil {
+			t.Fatalf("observed non-atomic write: %v; payload=%q", err, string(data))
+		}
+	}
+}
+
+func TestTail_CheckpointPrunesStaleEntries(t *testing.T) {
+	root, _, jsonlPath := newTailTree(t)
+	ckpt := filepath.Join(t.TempDir(), "tail-offsets.json")
+	sid := "tail0001-0000-0000-0000-000000000001"
+
+	// Seed a checkpoint that contains a stale (non-existent) path.
+	stalePath := "/definitely/does/not/exist/stale.jsonl"
+	seed := fmt.Sprintf(`{%q:42,%q:0}`, stalePath, jsonlPath)
+	if err := os.WriteFile(ckpt, []byte(seed), 0o644); err != nil {
+		t.Fatalf("seed ckpt: %v", err)
+	}
+
+	store, ch, cancel := startTailCheckpoint(t, root, ckpt)
+
+	// Drive a flush by appending an event and waiting for it to arrive.
+	appendLine(t, jsonlPath, userLine("u-flush", "seed-uuid", sid, "flush"))
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no event arrived")
+	}
+	cancel()
+	_ = store.Close()
+
+	// After teardown, the on-disk checkpoint must not mention the stale path.
+	if !waitFor(2*time.Second, 20*time.Millisecond, func() bool {
+		data, err := os.ReadFile(ckpt)
+		if err != nil {
+			return false
+		}
+		return !strings.Contains(string(data), stalePath)
+	}) {
+		data, _ := os.ReadFile(ckpt)
+		t.Fatalf("stale entry not pruned; checkpoint=%q", string(data))
+	}
+}
+
+func TestTail_CheckpointHandlesTruncatedFile(t *testing.T) {
+	root, _, jsonlPath := newTailTree(t)
+	ckpt := filepath.Join(t.TempDir(), "tail-offsets.json")
+	sid := "tail0001-0000-0000-0000-000000000001"
+
+	// Set checkpoint offset past current file size (simulating log rotation
+	// or external truncation between runs).
+	huge := int64(1 << 30)
+	seed := fmt.Sprintf(`{%q:%d}`, jsonlPath, huge)
+	if err := os.WriteFile(ckpt, []byte(seed), 0o644); err != nil {
+		t.Fatalf("seed ckpt: %v", err)
+	}
+
+	_, ch, _ := startTailCheckpoint(t, root, ckpt)
+
+	// A subsequently appended event must still arrive. (The implementation
+	// should detect offset > size at load and restart from EOF or 0; the
+	// existing scanAppend safety net handles size<off mid-flight too.)
+	appendLine(t, jsonlPath, userLine("u-rot", "seed-uuid", sid, "after rotate"))
+	select {
+	case it := <-ch:
+		if it.Err != nil {
+			t.Fatalf("unexpected err: %v", it.Err)
+		}
+		if it.Event.UUID != "u-rot" {
+			t.Fatalf("UUID=%q want u-rot", it.Event.UUID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("post-truncation append never arrived")
+	}
+}
+
+func TestTail_NoCheckpoint_NoFileCreated(t *testing.T) {
+	root, _, jsonlPath := newTailTree(t)
+	sid := "tail0001-0000-0000-0000-000000000001"
+
+	// Choose a sentinel path that should NOT be created by default Tail.
+	ckpt := filepath.Join(t.TempDir(), "sentinel.json")
+
+	store, ch, cancel := startTail(t, root) // no checkpoint option
+	appendLine(t, jsonlPath, userLine("u1", "seed-uuid", sid, "x"))
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no event")
+	}
+	cancel()
+	_ = store.Close()
+	if _, err := os.Stat(ckpt); !os.IsNotExist(err) {
+		t.Fatalf("default Tail must not create checkpoint file; Stat err=%v", err)
 	}
 }
