@@ -70,30 +70,45 @@ func TestNewForm_EnterWithWhitespaceBranchShowsError(t *testing.T) {
 
 func TestNewForm_TabCyclesFocus(t *testing.T) {
 	m := seedNewForm(t)
-	// Initial focus is on branch (newFormFocus == 0); render must show the
-	// branch input as focused. The cleanest assertion is the rendered
-	// View after a Tab: now focus should be on the base input. Because
-	// renderFooter renders both inputs unconditionally, we instead drive
-	// behaviour: after Tab, typing should land in the base input.
+	if got := tui.NewFormFocusOf(m); got != 0 {
+		t.Fatalf("pre-condition: newFormFocus = %d, want 0 (branch)", got)
+	}
 	m, _ = m.Update(sendSpecialKey(tea.KeyTab))
+	if got := tui.NewFormFocusOf(m); got != 1 {
+		t.Fatalf("after Tab, newFormFocus = %d, want 1 (base)", got)
+	}
 	m = typeStr(m, "develop")
-	// After committing with Enter, the resulting worktreeCreatedMsg-or-cmd
-	// reflects which base was used. We can't easily intercept that here
-	// without further export. Instead, assert the form's rendered footer
-	// includes the typed base value.
-	footerLower := strings.ToLower(stripANSI(m.View()))
-	if !strings.Contains(footerLower, "develop") {
-		t.Errorf("after Tab + typing 'develop', footer did not include the typed base; view=%q", footerLower)
+	if branch := tui.NewFormBranchValueOf(m); branch != "" {
+		t.Errorf("branch input value = %q after Tab + typing, want empty", branch)
+	}
+	// baseIn is seeded with "main" and the textinput cursor sits at end,
+	// so typed runes append. The exact concatenation pins both the seed
+	// survived and the typed runes hit the base input — a footer-substring
+	// check couldn't distinguish that from a Tab no-op.
+	if base := tui.NewFormBaseValueOf(m); base != "maindevelop" {
+		t.Errorf("base input value = %q after Tab + typing 'develop', want %q", base, "maindevelop")
+	}
+
+	m, _ = m.Update(sendSpecialKey(tea.KeyTab))
+	if got := tui.NewFormFocusOf(m); got != 0 {
+		t.Errorf("after second Tab, newFormFocus = %d, want 0 (cycle back to branch)", got)
 	}
 }
 
 func TestNewForm_ShiftTabAlsoCycles(t *testing.T) {
 	m := seedNewForm(t)
-	// shift-tab on field 0 → field 1 (cycle to base) — symmetric with tab.
+	if got := tui.NewFormFocusOf(m); got != 0 {
+		t.Fatalf("pre-condition: newFormFocus = %d, want 0 (branch)", got)
+	}
 	m, _ = m.Update(sendSpecialKey(tea.KeyShiftTab))
+	if got := tui.NewFormFocusOf(m); got != 1 {
+		t.Errorf("after Shift-Tab, newFormFocus = %d, want 1 (base)", got)
+	}
 	m = typeStr(m, "trunk")
-	footerLower := strings.ToLower(stripANSI(m.View()))
-	if !strings.Contains(footerLower, "trunk") {
-		t.Errorf("after Shift-Tab + typing 'trunk', footer did not include the typed base; view=%q", footerLower)
+	if branch := tui.NewFormBranchValueOf(m); branch != "" {
+		t.Errorf("branch input value = %q after Shift-Tab + typing, want empty", branch)
+	}
+	if base := tui.NewFormBaseValueOf(m); base != "maintrunk" {
+		t.Errorf("base input value = %q after Shift-Tab + typing 'trunk', want %q", base, "maintrunk")
 	}
 }
