@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -52,7 +53,7 @@ sandbox.`,
 		if demoKeepTmp {
 			fmt.Fprintf(cmd.ErrOrStderr(), "demo fixture: %s (--keep-tmp set; not cleaning up)\n", fix.Root)
 		} else {
-			defer func() { _ = fix.Cleanup() }()
+			defer func() { logCleanupErr(cmd.ErrOrStderr(), fix.Cleanup()) }()
 		}
 
 		os.Setenv("CANOPY_DEMO", "1")
@@ -117,6 +118,15 @@ func init() {
 	demoCmd.Flags().StringVar(&demoFreezeIn, "freeze-bin", "freeze", "name or path of the freeze binary used for capture-png")
 
 	rootCmd.AddCommand(demoCmd)
+}
+
+// logCleanupErr surfaces sandbox Cleanup() failures that would otherwise
+// vanish silently and leave /tmp/canopy-demo-* behind across runs.
+func logCleanupErr(stderr io.Writer, err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(stderr, "canopy demo: cleanup: %v\n", err)
 }
 
 // freezeAvailable reports whether the freeze binary is on PATH (or absolute).
