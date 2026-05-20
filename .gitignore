@@ -36,4 +36,5 @@ go.work.sum
 .claude/issue-runs/
 
 # canopy demo capture-png outputs — generated on demand, never committed
+*.png
 tui/testdata/golden/png/
