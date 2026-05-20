@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -21,6 +22,43 @@ import (
 // by Tail. Slow consumers cause sends to fail rather than block; see
 // docs/sessions-interface.md "Backpressure".
 const tailBufferSize = 256
+
+// Checkpoint flush thresholds. The run goroutine writes the offsets map
+// every checkpointFlushInterval, or sooner if checkpointFlushEvents
+// have been processed since the last flush. Both are package-internal
+// knobs; the public contract is just "opportunistically and on teardown".
+const (
+	checkpointFlushInterval = 5 * time.Second
+	checkpointFlushEvents   = 1000
+)
+
+// TailOption configures a Tail call. The variadic slot exists so future
+// tunables can be added without an API break.
+type TailOption func(*tailConfig)
+
+// tailConfig is the resolved set of TailOption applications.
+type tailConfig struct {
+	checkpointPath string
+}
+
+// TailWithCheckpoint persists per-file byte offsets to path so a
+// subsequent Tail seeded with the same path resumes from the last
+// persisted positions rather than current EOF. The file is written
+// atomically (temp file + rename). A missing or corrupt file is
+// tolerated: Tail falls back to current-EOF seeding and surfaces
+// nothing on the channel.
+//
+// Offsets are flushed opportunistically (every ~5s or every ~1000
+// processed events, whichever first) and once more on graceful
+// teardown.
+//
+// The schema is a flat JSON object whose keys are absolute JSONL paths
+// and values are int64 byte offsets. Paths absent from the in-memory
+// offsets map at flush time are not persisted, so deleted/rotated
+// files are naturally self-pruning.
+func TailWithCheckpoint(path string) TailOption {
+	return func(c *tailConfig) { c.checkpointPath = path }
+}
 
 // tail wires an fsnotify watcher to a goroutine that scans appended
 // bytes off the .jsonl files under the Store's root and forwards
@@ -36,6 +74,13 @@ type tailer struct {
 	// Cached projection of the root to identify subagent files
 	// without re-deriving from path components on every event.
 	root string
+
+	// Checkpoint state. checkpointPath is empty when checkpointing is
+	// disabled (zero overhead). eventsSinceFlush is bumped under t.mu
+	// by processLine on every successfully emitted Event; the run
+	// goroutine reads and resets it under the same lock.
+	checkpointPath   string
+	eventsSinceFlush int
 }
 
 // Tail returns a channel of live events across all sessions in the
@@ -47,7 +92,7 @@ type tailer struct {
 // For v1, only "user" and "assistant" lines are surfaced. Side-band
 // lines (attachment, system, file-history-snapshot) and meta lines
 // (last-prompt, ai-title, permission-mode, …) are filtered.
-func (s *Store) Tail(ctx context.Context) (<-chan TailItem, error) {
+func (s *Store) Tail(ctx context.Context, opts ...TailOption) (<-chan TailItem, error) {
 	s.mu.RLock()
 	root := s.root
 	closed := s.closed
@@ -56,17 +101,25 @@ func (s *Store) Tail(ctx context.Context) (<-chan TailItem, error) {
 		return nil, errors.New("sessions: store is closed")
 	}
 
+	cfg := &tailConfig{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(cfg)
+		}
+	}
+
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("sessions: new watcher: %w", err)
 	}
 
 	t := &tailer{
-		store:   s,
-		watcher: w,
-		out:     make(chan TailItem, tailBufferSize),
-		offsets: make(map[string]int64),
-		root:    root,
+		store:          s,
+		watcher:        w,
+		out:            make(chan TailItem, tailBufferSize),
+		offsets:        make(map[string]int64),
+		root:           root,
+		checkpointPath: cfg.checkpointPath,
 	}
 
 	// Walk the tree, add watches for every directory, and record the
@@ -77,7 +130,17 @@ func (s *Store) Tail(ctx context.Context) (<-chan TailItem, error) {
 		return nil, fmt.Errorf("sessions: seed watcher: %w", err)
 	}
 
-	go t.run(ctx)
+	// If a checkpoint is configured, layer persisted offsets on top of
+	// the EOF seed. Then catch up any bytes that were appended between
+	// the last persisted offset and the file's current size before the
+	// fsnotify loop starts — that's what gives the restart-resume
+	// guarantee.
+	var catchupPaths []string
+	if t.checkpointPath != "" {
+		catchupPaths = t.applyCheckpoint()
+	}
+
+	go t.run(ctx, catchupPaths)
 	return t.out, nil
 }
 
@@ -140,15 +203,44 @@ func (t *tailer) seedFromRoot() error {
 
 // run is the long-lived goroutine fed by fsnotify. It exits on ctx
 // cancellation or on a fatal watcher error; in either case the output
-// channel is closed and the watcher released.
-func (t *tailer) run(ctx context.Context) {
+// channel is closed and the watcher released. If a checkpoint path is
+// configured, run also drives the periodic flush ticker and a final
+// flush on every exit path so persisted state survives crashes the
+// caller didn't anticipate.
+//
+// catchupPaths is the list of files whose checkpointed offsets were
+// strictly below their current size at Tail() time. run drains those
+// before settling into the fsnotify loop so events that landed while
+// the process was down arrive in order, ahead of any live appends.
+func (t *tailer) run(ctx context.Context, catchupPaths []string) {
 	defer close(t.out)
 	defer func() { _ = t.watcher.Close() }()
+	if t.checkpointPath != "" {
+		defer t.flushCheckpoint()
+	}
+
+	// Replay any backlog the checkpoint loader identified. scanAppend
+	// handles partial-line and size<offset cases internally.
+	for _, p := range catchupPaths {
+		t.scanAppend(ctx, p)
+	}
+
+	// A nil ticker yields a nil channel, which makes the select arm a
+	// no-op when checkpointing is disabled. This keeps the hot path
+	// allocation-free for default Tail usage.
+	var tickC <-chan time.Time
+	if t.checkpointPath != "" {
+		tk := time.NewTicker(checkpointFlushInterval)
+		defer tk.Stop()
+		tickC = tk.C
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-tickC:
+			t.maybeFlushCheckpoint()
 		case ev, ok := <-t.watcher.Events:
 			if !ok {
 				return
@@ -343,6 +435,20 @@ func (t *tailer) processLine(ctx context.Context, path, sessionID string, line [
 		return
 	}
 	t.emit(ctx, TailItem{Event: ev})
+
+	if t.checkpointPath == "" {
+		return
+	}
+	t.mu.Lock()
+	t.eventsSinceFlush++
+	due := t.eventsSinceFlush >= checkpointFlushEvents
+	if due {
+		t.eventsSinceFlush = 0
+	}
+	t.mu.Unlock()
+	if due {
+		t.flushCheckpoint()
+	}
 }
 
 // emit sends one TailItem on the output channel without blocking. If
@@ -542,4 +648,140 @@ func sessionIDFromPath(path string) string {
 		return parent + "#" + agent
 	}
 	return stem
+}
+
+// --- checkpoint persistence (issue #12) ---
+
+// applyCheckpoint reads t.checkpointPath, layers persisted offsets onto
+// the in-memory map seeded by seedFromRoot, and returns the list of
+// paths whose persisted offset was below the file's current size. The
+// caller drains those paths once before entering the fsnotify loop so
+// events that landed while the process was down arrive in order.
+//
+// Only paths already in t.offsets after seedFromRoot are honored —
+// i.e., files discovered under this Store's own root. Foreign absolute
+// paths (from a shared checkpoint, a renamed projects dir, or a stale
+// cache pointing at unrelated files) are dropped silently. This is
+// what guarantees cross-root isolation when the same checkpoint file
+// is reused across Stores.
+//
+// Missing file, decode failure, truncation-since-last-run, and paths
+// that no longer exist are all silently tolerated — the contract is
+// "treat as fresh-start on any surprise". A corrupted cache never
+// poisons the live tail.
+func (t *tailer) applyCheckpoint() []string {
+	data, err := os.ReadFile(t.checkpointPath)
+	if err != nil {
+		return nil
+	}
+	var persisted map[string]int64
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		return nil
+	}
+
+	var catchup []string
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for path, off := range persisted {
+		if off < 0 {
+			continue
+		}
+		// Cross-root isolation: ignore any path the Store didn't
+		// discover under its own root.
+		if _, known := t.offsets[path]; !known {
+			continue
+		}
+		fi, statErr := os.Stat(path)
+		if statErr != nil {
+			// File no longer present; drop the entry.
+			continue
+		}
+		if fi.Size() < off {
+			// Truncation / rotation since last run. Reset to 0
+			// so we re-read from the start of the rotated file.
+			t.offsets[path] = 0
+			catchup = append(catchup, path)
+			continue
+		}
+		t.offsets[path] = off
+		if fi.Size() > off {
+			catchup = append(catchup, path)
+		}
+	}
+	return catchup
+}
+
+// maybeFlushCheckpoint is the periodic-ticker entrypoint. Skips the
+// write when no events have been processed since the last flush, so an
+// idle store doesn't churn disk on every tick.
+func (t *tailer) maybeFlushCheckpoint() {
+	t.mu.Lock()
+	idle := t.eventsSinceFlush == 0
+	t.eventsSinceFlush = 0
+	t.mu.Unlock()
+	if idle {
+		return
+	}
+	t.flushCheckpoint()
+}
+
+// flushCheckpoint snapshots t.offsets under the lock and writes it
+// atomically. Disk errors are intentionally swallowed: the tail loop
+// must not stall on a wedged filesystem, and the next flush cycle (or
+// the next process start) will retry. A noisy log here belongs in a
+// higher layer if and when it matters.
+func (t *tailer) flushCheckpoint() {
+	if t.checkpointPath == "" {
+		return
+	}
+	t.mu.Lock()
+	snapshot := make(map[string]int64, len(t.offsets))
+	for k, v := range t.offsets {
+		snapshot[k] = v
+	}
+	t.mu.Unlock()
+	_ = writeCheckpoint(t.checkpointPath, snapshot)
+}
+
+// writeCheckpoint persists offsets to path via temp-file + rename. On
+// any failure the temp file is removed and the original path is left
+// untouched. POSIX rename is atomic within a single filesystem, which
+// is the case here because the temp file is created in the same dir.
+func writeCheckpoint(path string, offsets map[string]int64) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("sessions: mkdir checkpoint dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".tail-offsets-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("sessions: create temp checkpoint: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+
+	encoded, err := json.Marshal(offsets)
+	if err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("sessions: marshal checkpoint: %w", err)
+	}
+	if _, err := tmp.Write(encoded); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("sessions: write checkpoint: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("sessions: sync checkpoint: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("sessions: close checkpoint: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return fmt.Errorf("sessions: rename checkpoint: %w", err)
+	}
+	return nil
 }

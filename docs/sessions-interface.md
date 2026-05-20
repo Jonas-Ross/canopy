@@ -262,6 +262,18 @@ type TailStats struct {
 	Dropped uint64 // events discarded because the consumer was too slow
 }
 
+// TailOption configures a Tail call. Variadic slot so future tunables
+// can be added without an API break.
+type TailOption func(*tailConfig)
+
+// TailWithCheckpoint persists per-file byte offsets to path so a
+// subsequent Tail seeded with the same path resumes from the last
+// persisted positions instead of current EOF. The file is written
+// atomically (temp file + rename). Missing or corrupt files fall back
+// to current-EOF seeding silently. Offsets flush every ~5s, every
+// ~1000 processed events, and once on graceful teardown.
+func TailWithCheckpoint(path string) TailOption { /* impl */ return nil }
+
 // OpenOption configures Open. Functional-option slot so background
 // indexing / progress can be added without an API break.
 type OpenOption func(*openConfig)
@@ -344,7 +356,14 @@ func (s *Store) Events(sessionID string) iter.Seq2[Event, error] { /* impl */ re
 // is exposed via TailStats. Slow consumers are visible, never deadlocking.
 //
 // Cancellation: ctx cancellation closes the channel cleanly.
-func (s *Store) Tail(ctx context.Context) (<-chan TailItem, error) { /* impl */ return nil, nil }
+//
+// TailOption: variadic functional options. TailWithCheckpoint(path)
+// persists per-file byte offsets to disk so a subsequent Tail seeded
+// with the same path resumes from the last persisted positions
+// instead of current EOF, surviving restarts (and a future daemon
+// mode) without missing events. Missing/corrupt checkpoint files fall
+// back to current-EOF seeding silently.
+func (s *Store) Tail(ctx context.Context, opts ...TailOption) (<-chan TailItem, error) { /* impl */ return nil, nil }
 
 // TailStats reports observability counters for the live tail.
 func (s *Store) TailStats() TailStats { /* impl */ return TailStats{} }
@@ -400,9 +419,6 @@ for ev, err := range store.Events(live.ID) {
 
 ## What this interface deliberately does not include
 
-- **File-position checkpointing for Tail** — restart picks up live via
-  fsnotify; resume-from-offset is a v2 concern. See jsonl-schema.md §10
-  Pending.
 - **`file-history-snapshot` payload** — counted out of `Events` like
   the other side-band lines, and intentionally not modeled on
   `SessionMeta`. The payload is a snapshot blob, not flat last-write-
