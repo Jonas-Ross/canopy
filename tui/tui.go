@@ -137,6 +137,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pulseExpiredMsg:
+		// Bursty live updates can schedule a later tick that extends pulseUntil
+		// past this tick's deadline. Only clear when the window has actually
+		// elapsed — a still-fresh pulse keeps running until its own tick fires.
+		if m.now().Before(m.pulseUntil) {
+			return m, nil
+		}
 		m.pulsePath = ""
 		m.pulseUntil = time.Time{}
 		return m, nil
