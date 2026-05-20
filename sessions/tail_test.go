@@ -840,6 +840,72 @@ func TestTail_CheckpointHandlesTruncatedFile(t *testing.T) {
 	}
 }
 
+func TestTail_CheckpointIgnoresForeignRootPaths(t *testing.T) {
+	// Simulate a shared checkpoint file that contains entries for a
+	// projects root other than the one we're opening. Tail must NOT
+	// pick those up — otherwise a single shared cache would leak
+	// events from unrelated projects (Codex P1, PR #45).
+	rootA, projDirA, _ := newTailTree(t) // unused as the "current" root
+	_ = rootA
+
+	// Build a second root that we will actually Open.
+	rootB := t.TempDir()
+	projDirB := filepath.Join(rootB, "-tmp-projects-tail-b")
+	if err := os.MkdirAll(projDirB, 0o755); err != nil {
+		t.Fatalf("mkdir projB: %v", err)
+	}
+	jsonlB := filepath.Join(projDirB, "rootb001-0000-0000-0000-000000000001.jsonl")
+	sidB := "rootb001-0000-0000-0000-000000000001"
+	if err := os.WriteFile(jsonlB, []byte(attachmentLine("seed-b", "", sidB)), 0o644); err != nil {
+		t.Fatalf("seed jsonlB: %v", err)
+	}
+
+	// Build a foreign JSONL under rootA and pre-populate it with a
+	// line that, if leaked, would arrive on rootB's Tail channel.
+	jsonlForeign := filepath.Join(projDirA, "foreign1-0000-0000-0000-000000000001.jsonl")
+	foreignSID := "foreign1-0000-0000-0000-000000000001"
+	if err := os.WriteFile(jsonlForeign, []byte(attachmentLine("seed-foreign", "", foreignSID)+userLine("u-foreign", "seed-foreign", foreignSID, "from foreign root")), 0o644); err != nil {
+		t.Fatalf("seed foreign: %v", err)
+	}
+
+	// Write a checkpoint that includes the foreign path at offset 0
+	// (so a naive load would replay its entire history through Tail).
+	ckpt := filepath.Join(t.TempDir(), "tail-offsets.json")
+	seed := fmt.Sprintf(`{%q:0,%q:0}`, jsonlForeign, jsonlB)
+	if err := os.WriteFile(ckpt, []byte(seed), 0o644); err != nil {
+		t.Fatalf("seed ckpt: %v", err)
+	}
+
+	// Open the store at rootB and start Tail with the shared
+	// checkpoint. The foreign-root entry must be ignored.
+	_, ch, _ := startTailCheckpoint(t, rootB, ckpt)
+
+	// Append a fresh event to rootB so we have a positive signal that
+	// Tail is alive and processing.
+	appendLine(t, jsonlB, userLine("u-b", "seed-b", sidB, "from root b"))
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case it, ok := <-ch:
+			if !ok {
+				t.Fatal("channel closed before live event")
+			}
+			if it.Err != nil {
+				t.Fatalf("unexpected err: %v", it.Err)
+			}
+			if it.Event.UUID == "u-foreign" {
+				t.Fatal("foreign-root event leaked through despite cross-root isolation requirement")
+			}
+			if it.Event.UUID == "u-b" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("rootB live event never arrived")
+		}
+	}
+}
+
 func TestTail_NoCheckpoint_NoFileCreated(t *testing.T) {
 	root, _, jsonlPath := newTailTree(t)
 	sid := "tail0001-0000-0000-0000-000000000001"

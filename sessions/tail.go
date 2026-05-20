@@ -658,9 +658,17 @@ func sessionIDFromPath(path string) string {
 // caller drains those paths once before entering the fsnotify loop so
 // events that landed while the process was down arrive in order.
 //
-// Missing file, decode failure, and paths that no longer exist are all
-// silently tolerated — the contract is "treat as fresh-start on any
-// surprise". This keeps a corrupted cache from poisoning the live tail.
+// Only paths already in t.offsets after seedFromRoot are honored —
+// i.e., files discovered under this Store's own root. Foreign absolute
+// paths (from a shared checkpoint, a renamed projects dir, or a stale
+// cache pointing at unrelated files) are dropped silently. This is
+// what guarantees cross-root isolation when the same checkpoint file
+// is reused across Stores.
+//
+// Missing file, decode failure, truncation-since-last-run, and paths
+// that no longer exist are all silently tolerated — the contract is
+// "treat as fresh-start on any surprise". A corrupted cache never
+// poisons the live tail.
 func (t *tailer) applyCheckpoint() []string {
 	data, err := os.ReadFile(t.checkpointPath)
 	if err != nil {
@@ -676,6 +684,11 @@ func (t *tailer) applyCheckpoint() []string {
 	defer t.mu.Unlock()
 	for path, off := range persisted {
 		if off < 0 {
+			continue
+		}
+		// Cross-root isolation: ignore any path the Store didn't
+		// discover under its own root.
+		if _, known := t.offsets[path]; !known {
 			continue
 		}
 		fi, statErr := os.Stat(path)
