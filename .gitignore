@@ -35,5 +35,7 @@ go.work.sum
 .worktrees/
 .claude/issue-runs/
 
-# canopy demo capture-png outputs — generated on demand, never committed
-tui/testdata/golden/png/
+# canopy demo capture-png outputs — generated on demand, never committed.
+# Scope-limited so future legit PNGs (e.g. docs/images/) aren't shadowed.
+/*.png
+tui/testdata/**/*.png

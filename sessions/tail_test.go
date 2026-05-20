@@ -459,3 +459,36 @@ closed:
 		t.Errorf("goroutine leak: before=%d after=%d", gBefore, runtime.NumGoroutine())
 	}
 }
+
+func TestDecodeTailLine_SessionIDFallback(t *testing.T) {
+	const (
+		fallback = "fallback-0000-0000-0000-000000000001"
+		raw      = "raw-line-0000-0000-0000-000000000002"
+	)
+	tests := []struct {
+		name     string
+		fallback string
+		rawSID   string
+		want     string
+	}{
+		{"fallback set, raw set: fallback wins", fallback, raw, fallback},
+		{"fallback set, raw empty: fallback wins", fallback, "", fallback},
+		{"fallback empty, raw set: raw fills in", "", raw, raw},
+		{"fallback empty, raw empty: empty", "", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			line := userLine("u1", "", tc.rawSID, "hi")
+			ev, ok, err := decodeTailLine([]byte(line), tc.fallback)
+			if err != nil {
+				t.Fatalf("decodeTailLine err: %v", err)
+			}
+			if !ok {
+				t.Fatalf("decodeTailLine: ok=false, want true")
+			}
+			if ev.SessionID != tc.want {
+				t.Errorf("SessionID=%q want %q", ev.SessionID, tc.want)
+			}
+		})
+	}
+}
