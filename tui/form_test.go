@@ -57,6 +57,48 @@ func TestNewForm_EnterWithEmptyBranchShowsError(t *testing.T) {
 	if got := tui.ModeOf(m); got != tui.ModeNewWorktreeForTest {
 		t.Errorf("after empty-Enter, mode = %d, want %d (stay in form)", got, tui.ModeNewWorktreeForTest)
 	}
+	// Bug #18: the error must be visible in the rendered footer, not just
+	// set on the model. renderFooter's modeNewWorktree branch used to render
+	// only the form widgets and discard the notice entirely.
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "branch name required") {
+		t.Errorf("View does not display the validation error — form footer must surface m.notice; view:\n%s", view)
+	}
+}
+
+// Bug #18: handleKey preemptively clears m.notice on every KeyMsg before
+// routing to updateNewWorktreeForm. With the validation error in m.notice,
+// the next keystroke (e.g., the user typing to retry) wipes the message.
+// In form mode the notice carries the validation error and must persist
+// across keystrokes so the user has time to read it.
+func TestNewForm_ValidationErrorPersistsAcrossKeystrokes(t *testing.T) {
+	m := seedNewForm(t)
+	m, _ = m.Update(sendSpecialKey(tea.KeyEnter)) // triggers "branch name required"
+	if got := stripANSI(tui.NoticeOf(m)); !strings.Contains(got, "branch name required") {
+		t.Fatalf("pre-condition: notice = %q, want 'branch name required' before subsequent keystroke", got)
+	}
+	// Simulate the user starting to type a corrected branch name.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+
+	notice := stripANSI(tui.NoticeOf(m))
+	if !strings.Contains(notice, "branch name required") {
+		t.Errorf("notice = %q after one keystroke, want still 'branch name required' (must not be cleared in form mode)", notice)
+	}
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "branch name required") {
+		t.Errorf("View no longer displays the validation error after a keystroke — error vanished as a one-frame flash; view:\n%s", view)
+	}
+}
+
+// Esc out of the form must clear the validation error so the next time the
+// user opens the form (with 'n') they don't see a stale message.
+func TestNewForm_EscClearsValidationError(t *testing.T) {
+	m := seedNewForm(t)
+	m, _ = m.Update(sendSpecialKey(tea.KeyEnter)) // sets the error
+	m, _ = m.Update(sendSpecialKey(tea.KeyEsc))   // cancels the form
+	if notice := stripANSI(tui.NoticeOf(m)); notice != "" {
+		t.Errorf("notice after Esc = %q, want empty (form cancel must clear validation error)", notice)
+	}
 }
 
 func TestNewForm_EnterWithWhitespaceBranchShowsError(t *testing.T) {
