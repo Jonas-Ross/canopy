@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -34,9 +36,30 @@ func MakeShellDroppedMsg(err error) tea.Msg {
 // Cmd factories — exposed so soft-gate tests can call the cmds directly
 // and observe the returned message without going through the Update loop.
 
-func RemoveWorktreeCmdForTest(path string) tea.Cmd { return removeWorktreeCmd(path) }
+func RemoveWorktreeCmdForTest(path string) tea.Cmd { return removeWorktreeCmd(context.Background(), path) }
 func KillProcsCmdForTest(pids []int) tea.Cmd       { return killProcsCmd(pids, "") }
 func OpenURLCmdForTest(url string) tea.Cmd         { return openURLCmd(url) }
+
+// Ctx-aware variants for tests that need to assert run-ctx propagation
+// (e.g. cancellation tests for #23).
+func RemoveWorktreeCmdForTestCtx(ctx context.Context, path string) tea.Cmd {
+	return removeWorktreeCmd(ctx, path)
+}
+func CreateWorktreeCmdForTestCtx(ctx context.Context, repoRoot, branch, base string) tea.Cmd {
+	return createWorktreeCmd(ctx, repoRoot, branch, base)
+}
+
+// FormatGitErrorForTest exposes the unexported helper that strips the noisy
+// "exit status N:" prefix from wrapped exec errors (#25).
+func FormatGitErrorForTest(err error, combinedOut []byte) error {
+	return formatGitError(err, combinedOut)
+}
+
+// WrapKillSignalErrorForTest exposes the unexported helper that annotates a
+// SIGTERM failure with its PID (#25).
+func WrapKillSignalErrorForTest(pid int, err error) error {
+	return wrapKillSignalError(pid, err)
+}
 
 // Mode introspection — for asserting a Model is in the right modal state.
 
@@ -83,7 +106,7 @@ func Truncate(s string, max int) string     { return truncate(s, max) }
 // CreateWorktreeCmdForTest exposes createWorktreeCmd so tests can drive
 // the branch-name validation and soft-gate paths.
 func CreateWorktreeCmdForTest(repoRoot, branch, base string) tea.Cmd {
-	return createWorktreeCmd(repoRoot, branch, base)
+	return createWorktreeCmd(context.Background(), repoRoot, branch, base)
 }
 
 // ValidBranchOrBaseName exposes the unexported validator for direct table
