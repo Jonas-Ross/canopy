@@ -264,9 +264,9 @@ func dirtyCountString(n int) string {
 
 func prDetailState(p pr.PR) string {
 	switch {
-	case p.State == "MERGED":
+	case p.State == pr.PRStateMerged:
 		return prStateMergedStyle.Render("merged")
-	case p.State == "CLOSED":
+	case p.State == pr.PRStateClosed:
 		return prStateClosedStyle.Render("closed")
 	case p.IsDraft:
 		return prStateDraftStyle.Render("draft")
@@ -275,26 +275,26 @@ func prDetailState(p pr.PR) string {
 	}
 }
 
-func prDetailCI(rollup string) string {
+func prDetailCI(rollup pr.CIStatus) string {
 	switch rollup {
-	case "SUCCESS":
+	case pr.CISuccess:
 		return prCISuccessStyle.Render("✓ passing")
-	case "FAILURE":
+	case pr.CIFailure:
 		return prCIFailureStyle.Render("✗ failing")
-	case "PENDING":
+	case pr.CIPending:
 		return prCIPendingStyle.Render("⋯ pending")
 	default:
 		return ""
 	}
 }
 
-func prDetailReview(state string) string {
+func prDetailReview(state pr.ReviewState) string {
 	switch state {
-	case "APPROVED":
+	case pr.ReviewApproved:
 		return prReviewApprStyle.Render("approved")
-	case "CHANGES_REQUESTED":
+	case pr.ReviewChangesRequested:
 		return prReviewChangeStyle.Render("changes requested")
-	case "REVIEW_REQUIRED":
+	case pr.ReviewRequired:
 		return prReviewReqStyle.Render("review required")
 	default:
 		return ""

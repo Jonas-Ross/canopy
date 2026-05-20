@@ -186,7 +186,7 @@ func TestUpdate_PROpenedMsg_SuccessDismissesNotice(t *testing.T) {
 	// returned cmd fires.
 	state := aggregator.WorktreeState{
 		Worktree: newBaseWorktree("/repo/wt-a", "feat/a"),
-		PR:       &pr.PR{Number: 1, URL: "https://example.invalid/pull/1", State: "OPEN"},
+		PR:       &pr.PR{Number: 1, URL: "https://example.invalid/pull/1", State: pr.PRStateOpen},
 	}
 	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{Worktree: "/repo/wt-a", State: state}))
 	m, _ = m.Update(sendKey('p')) // sets "opening https://…" notice

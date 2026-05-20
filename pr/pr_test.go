@@ -124,13 +124,13 @@ func TestList_ParsesHappyPath(t *testing.T) {
 	if got.Number != 101 || got.Title != "feat: add canopy" || got.HeadBranch != "feat/canopy" {
 		t.Errorf("prs[0] identity mismatch: %+v", got)
 	}
-	if got.State != "OPEN" || got.IsDraft {
+	if got.State != PRStateOpen || got.IsDraft {
 		t.Errorf("prs[0] state mismatch: State=%q IsDraft=%v", got.State, got.IsDraft)
 	}
-	if got.CIRollup != "SUCCESS" {
+	if got.CIRollup != CISuccess {
 		t.Errorf("prs[0] CIRollup=%q, want SUCCESS", got.CIRollup)
 	}
-	if got.ReviewState != "APPROVED" {
+	if got.ReviewState != ReviewApproved {
 		t.Errorf("prs[0] ReviewState=%q, want APPROVED", got.ReviewState)
 	}
 	if !got.MergedAt.IsZero() {
@@ -149,19 +149,19 @@ func TestList_ParsesHappyPath(t *testing.T) {
 	if got.Number != 102 || !got.IsDraft {
 		t.Errorf("prs[1] identity/draft mismatch: %+v", got)
 	}
-	if got.State != "OPEN" {
+	if got.State != PRStateOpen {
 		t.Errorf("prs[1] State=%q, want OPEN", got.State)
 	}
-	if got.CIRollup != "PENDING" {
+	if got.CIRollup != CIPending {
 		t.Errorf("prs[1] CIRollup=%q, want PENDING", got.CIRollup)
 	}
-	if got.ReviewState != "REVIEW_REQUIRED" {
+	if got.ReviewState != ReviewRequired {
 		t.Errorf("prs[1] ReviewState=%q", got.ReviewState)
 	}
 
 	// PR 99: merged.
 	got = prs[2]
-	if got.State != "MERGED" {
+	if got.State != PRStateMerged {
 		t.Errorf("prs[2] State=%q, want MERGED", got.State)
 	}
 	wantMerged := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
@@ -267,7 +267,7 @@ func TestList_CIRollup_AllSuccess(t *testing.T) {
 		{Status: "COMPLETED", Conclusion: "SUCCESS"},
 		{Status: "COMPLETED", Conclusion: "SKIPPED"},
 	})
-	if got != "SUCCESS" {
+	if got != CISuccess {
 		t.Fatalf("rollupCI=%q, want SUCCESS", got)
 	}
 }
@@ -278,7 +278,7 @@ func TestList_CIRollup_AnyFailure(t *testing.T) {
 		{Status: "COMPLETED", Conclusion: "FAILURE"},
 		{Status: "COMPLETED", Conclusion: "SUCCESS"},
 	})
-	if got != "FAILURE" {
+	if got != CIFailure {
 		t.Fatalf("rollupCI=%q, want FAILURE", got)
 	}
 }
@@ -292,7 +292,7 @@ func TestList_CIRollup_PendingShortCircuits(t *testing.T) {
 		{Status: "IN_PROGRESS", Conclusion: ""},
 		{Status: "COMPLETED", Conclusion: "SUCCESS"},
 	})
-	if got != "PENDING" {
+	if got != CIPending {
 		t.Fatalf("rollupCI=%q, want PENDING", got)
 	}
 
@@ -301,7 +301,7 @@ func TestList_CIRollup_PendingShortCircuits(t *testing.T) {
 		{Status: "QUEUED", Conclusion: ""},
 		{Status: "COMPLETED", Conclusion: "FAILURE"},
 	})
-	if got != "PENDING" {
+	if got != CIPending {
 		t.Fatalf("rollupCI(QUEUED)=%q, want PENDING", got)
 	}
 
@@ -310,7 +310,7 @@ func TestList_CIRollup_PendingShortCircuits(t *testing.T) {
 		{Status: "PENDING", Conclusion: ""},
 		{Status: "COMPLETED", Conclusion: "SUCCESS"},
 	})
-	if got != "PENDING" {
+	if got != CIPending {
 		t.Fatalf("rollupCI(PENDING status)=%q, want PENDING", got)
 	}
 }

@@ -204,8 +204,8 @@ func TestSnapshot_SingleRepo_FullJoin(t *testing.T) {
 
 	prCache := installFakePRCache(t, map[string][]pr.PR{
 		repoRoot: {
-			{Number: 42, Title: "Add a thing", HeadBranch: "feat/a", State: "OPEN", CIRollup: "SUCCESS"},
-			{Number: 43, Title: "Add b thing", HeadBranch: "feat/b", State: "OPEN"},
+			{Number: 42, Title: "Add a thing", HeadBranch: "feat/a", State: pr.PRStateOpen, CIRollup: pr.CISuccess},
+			{Number: 43, Title: "Add b thing", HeadBranch: "feat/b", State: pr.PRStateOpen},
 		},
 	}, false, nil)
 
@@ -668,7 +668,7 @@ func TestSnapshot_PRStale(t *testing.T) {
 		worktrees: map[string][]git.Worktree{repoRoot: {{Path: wt, Branch: "feat/x"}}},
 	}
 	prCache := installFakePRCache(t, map[string][]pr.PR{
-		repoRoot: {{Number: 1, HeadBranch: "feat/x", State: "OPEN"}},
+		repoRoot: {{Number: 1, HeadBranch: "feat/x", State: pr.PRStateOpen}},
 	}, true, nil)
 
 	a := newTestAggregator(t, Config{
