@@ -3,6 +3,7 @@ package tui_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -123,6 +124,88 @@ func TestEscInNormalMode_ClearsCommittedFilter(t *testing.T) {
 	m, _ = m.Update(sendSpecialKey(tea.KeyEsc))
 	if got := tui.FilterValue(m); got != "" {
 		t.Errorf("filter = %q after esc in normal mode, want empty", got)
+	}
+}
+
+// armPulse seeds worktreePath into the model and transitions Live nil→non-nil
+// at the current clk, arming a pulse. Returns the updated model.
+func armPulse(t *testing.T, m tea.Model, worktreePath, branch string) tea.Model {
+	t.Helper()
+	live := &sessions.Session{ID: branch, Model: "claude-opus-4-7", Cwds: []string{worktreePath}}
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: worktreePath,
+		State:    aggregator.WorktreeState{Worktree: newBaseWorktree(worktreePath, branch)},
+	}))
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: worktreePath,
+		State: aggregator.WorktreeState{
+			Worktree: newBaseWorktree(worktreePath, branch),
+			Live:     live,
+		},
+	}))
+	return m
+}
+
+func TestPulseExpiredMsg_ClearsPulseState(t *testing.T) {
+	clk := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	m := tui.NewModel(&fakeRefresher{})
+	m = tui.SetNow(m, func() time.Time { return clk })
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	m = armPulse(t, m, "/repo/wt-b", "feat/b")
+
+	if got := tui.PulsePathOf(m); got != "/repo/wt-b" {
+		t.Fatalf("pre-condition: pulsePath = %q, want /repo/wt-b", got)
+	}
+	until := tui.PulseUntilOf(m)
+	if until.IsZero() {
+		t.Fatalf("pre-condition: pulseUntil is zero, want non-zero")
+	}
+
+	// Advance past the deadline before firing the tick — the handler only
+	// clears state when the timer is actually expired (see fresher-pulse test).
+	clk = until.Add(time.Millisecond)
+	m, _ = m.Update(tui.MakePulseExpiredMsg())
+
+	if got := tui.PulsePathOf(m); got != "" {
+		t.Errorf("pulsePath = %q after pulseExpiredMsg, want empty (handler must clear)", got)
+	}
+	if got := tui.PulseUntilOf(m); !got.IsZero() {
+		t.Errorf("pulseUntil = %v after pulseExpiredMsg, want zero time (handler must clear)", got)
+	}
+}
+
+// Bursty live updates schedule overlapping tea.Tick timers. When the older
+// tick fires while a fresher pulse is still active, pulseExpiredMsg must
+// be a no-op — otherwise the highlight duration becomes non-deterministic
+// under rapid updates.
+func TestPulseExpiredMsg_StaleTimerLeavesFresherPulseAlone(t *testing.T) {
+	clk := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	m := tui.NewModel(&fakeRefresher{})
+	m = tui.SetNow(m, func() time.Time { return clk })
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	m = armPulse(t, m, "/repo/wt-a", "feat/a")
+	firstUntil := tui.PulseUntilOf(m)
+
+	// Advance time and arm a second, fresher pulse on a different worktree.
+	clk = clk.Add(200 * time.Millisecond)
+	m = armPulse(t, m, "/repo/wt-b", "feat/b")
+	secondUntil := tui.PulseUntilOf(m)
+	if !secondUntil.After(firstUntil) {
+		t.Fatalf("pre-condition: second pulseUntil (%v) must be later than first (%v)", secondUntil, firstUntil)
+	}
+
+	// Advance the clock to the first pulse's deadline, when its tick fires.
+	// The second pulse is still active (secondUntil > firstUntil > clk).
+	clk = firstUntil
+	m, _ = m.Update(tui.MakePulseExpiredMsg())
+
+	if got := tui.PulsePathOf(m); got != "/repo/wt-b" {
+		t.Errorf("pulsePath = %q after stale tick, want /repo/wt-b (newer pulse must survive)", got)
+	}
+	if got := tui.PulseUntilOf(m); !got.Equal(secondUntil) {
+		t.Errorf("pulseUntil = %v after stale tick, want %v (must not advance/clear newer pulse)", got, secondUntil)
 	}
 }
 

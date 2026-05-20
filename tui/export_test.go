@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -31,6 +32,10 @@ func MakePROpenedMsg(err error) tea.Msg {
 
 func MakeShellDroppedMsg(err error) tea.Msg {
 	return shellDroppedMsg{err: err}
+}
+
+func MakePulseExpiredMsg() tea.Msg {
+	return pulseExpiredMsg{}
 }
 
 // Cmd factories — exposed so soft-gate tests can call the cmds directly
@@ -147,4 +152,22 @@ func NewFormBaseValueOf(m tea.Model) string {
 		return mm.newBaseInput.Value()
 	}
 	return ""
+}
+
+// PulsePathOf returns the worktree path currently being pulsed (or "" if
+// none). Returns "" on a type-assertion miss.
+func PulsePathOf(m tea.Model) string {
+	if mm, ok := m.(Model); ok {
+		return mm.pulsePath
+	}
+	return ""
+}
+
+// PulseUntilOf returns the timestamp the current pulse expires at (or zero
+// time if none is active). Returns zero time on a type-assertion miss.
+func PulseUntilOf(m tea.Model) time.Time {
+	if mm, ok := m.(Model); ok {
+		return mm.pulseUntil
+	}
+	return time.Time{}
 }

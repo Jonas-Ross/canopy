@@ -137,6 +137,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pulseExpiredMsg:
+		// Bursty live updates can schedule a later tick that extends pulseUntil
+		// past this tick's deadline. Only clear when the window has actually
+		// elapsed — a still-fresh pulse keeps running until its own tick fires.
+		if m.now().Before(m.pulseUntil) {
+			return m, nil
+		}
+		m.pulsePath = ""
+		m.pulseUntil = time.Time{}
 		return m, nil
 
 	case prOpenedMsg:
@@ -200,8 +208,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Any keypress dismisses a pending notice. Handlers may set a new notice
-	// after this; that new value sticks until the *next* keypress.
-	m.notice = ""
+	// after this; that new value sticks until the *next* keypress. Form mode
+	// is the exception: m.notice carries the form-validation error there and
+	// must persist across keystrokes so the user has time to read it (the
+	// form handler clears it explicitly on Esc / successful create).
+	if m.mode != modeNewWorktree {
+		m.notice = ""
+	}
 
 	switch m.mode {
 	case modeFiltering:
@@ -541,7 +554,15 @@ func (m Model) renderFooter(width int) string {
 		state, _ := m.focusedState()
 		return "  " + promptStyle.Render(fmt.Sprintf("send SIGTERM to %d procs in %s? [y/N]", len(state.Procs), FormatBranch(state.Worktree.Branch, state.Worktree.Detached)))
 	case modeNewWorktree:
-		return "  " + promptStyle.Render("new worktree") + "    " + m.newBranchInput.View() + "    " + m.newBaseInput.View() + "    " + keyDescStyle.Render("[tab] switch  [enter] create  [esc] cancel")
+		// A pending validation error displaces the keybind hint — once the
+		// user has invoked Enter they need the feedback more than the prompt.
+		var trailing string
+		if m.notice != "" {
+			trailing = m.notice
+		} else {
+			trailing = keyDescStyle.Render("[tab] switch  [enter] create  [esc] cancel")
+		}
+		return "  " + promptStyle.Render("new worktree") + "    " + m.newBranchInput.View() + "    " + m.newBaseInput.View() + "    " + trailing
 	}
 
 	// Transient notice (errors, action results, f/tab stubs). Cleared on the

@@ -93,6 +93,39 @@ func TestUpdate_WorktreeRemovedMsg_SuccessRemovesRowFromModel(t *testing.T) {
 	}
 }
 
+// Pruning the focused last row must clamp focus so the cursor glyph (▍)
+// stays visible on the new last row.
+func TestUpdate_WorktreeRemovedMsg_PruneLastFocused_KeepsCursorVisible(t *testing.T) {
+	rf := &fakeRefresher{}
+	m := tui.NewModel(rf)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	for i, path := range []string{"/repo/main", "/repo/wt-a", "/repo/wt-b"} {
+		branch := []string{"main", "feat/a", "feat/b"}[i]
+		m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+			Worktree: path,
+			State:    aggregator.WorktreeState{Worktree: newBaseWorktree(path, branch)},
+		}))
+	}
+	// Move focus to the last row (index 2).
+	m, _ = m.Update(sendKey('j'))
+	m, _ = m.Update(sendKey('j'))
+	if got := tui.FocusIndex(m); got != 2 {
+		t.Fatalf("pre-condition: focus = %d, want 2", got)
+	}
+
+	var cmd tea.Cmd
+	m, cmd = m.Update(tui.MakeWorktreeRemovedMsg("/repo/wt-b", nil))
+	runIfCmd(cmd)
+
+	if got := tui.FocusIndex(m); got != 1 {
+		t.Errorf("focus = %d after pruning the focused last row, want 1 (clamped to new last)", got)
+	}
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "▍") {
+		t.Errorf("View shows no focus cursor (▍) after pruning the focused last row — clamp regressed; view:\n%s", view)
+	}
+}
+
 // Pruning a non-tracked path (e.g. duplicate message arriving after the
 // row is already gone) must be a safe no-op.
 func TestUpdate_WorktreeRemovedMsg_UnknownPathSafeNoop(t *testing.T) {

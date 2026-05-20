@@ -240,6 +240,7 @@ func (m Model) updateNewWorktreeForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.mode = modeNormal
 		m.newBranchInput.Blur()
 		m.newBaseInput.Blur()
+		m.notice = "" // form mode persists notices across keystrokes; cancel must clear.
 		return m, nil
 
 	case tea.KeyTab, tea.KeyShiftTab:
@@ -267,6 +268,7 @@ func (m Model) updateNewWorktreeForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.mode = modeNormal
 		m.newBranchInput.Blur()
 		m.newBaseInput.Blur()
+		m.notice = ""
 		return m, createWorktreeCmd(m.runCtx, m.repoRoot, branch, base)
 	}
 

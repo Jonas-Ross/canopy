@@ -57,6 +57,40 @@ func TestNewForm_EnterWithEmptyBranchShowsError(t *testing.T) {
 	if got := tui.ModeOf(m); got != tui.ModeNewWorktreeForTest {
 		t.Errorf("after empty-Enter, mode = %d, want %d (stay in form)", got, tui.ModeNewWorktreeForTest)
 	}
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "branch name required") {
+		t.Errorf("View does not display the validation error — form footer must surface m.notice; view:\n%s", view)
+	}
+}
+
+// The validation notice must survive keystrokes while the form is open so
+// the user can read it while retyping.
+func TestNewForm_ValidationErrorPersistsAcrossKeystrokes(t *testing.T) {
+	m := seedNewForm(t)
+	m, _ = m.Update(sendSpecialKey(tea.KeyEnter))
+	if got := stripANSI(tui.NoticeOf(m)); !strings.Contains(got, "branch name required") {
+		t.Fatalf("pre-condition: notice = %q, want 'branch name required' before subsequent keystroke", got)
+	}
+	m, _ = m.Update(sendKey('f'))
+
+	notice := stripANSI(tui.NoticeOf(m))
+	if !strings.Contains(notice, "branch name required") {
+		t.Errorf("notice = %q after one keystroke, want still 'branch name required' (must not be cleared in form mode)", notice)
+	}
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "branch name required") {
+		t.Errorf("View no longer displays the validation error after a keystroke; view:\n%s", view)
+	}
+}
+
+// Esc must clear the validation error so the next open starts clean.
+func TestNewForm_EscClearsValidationError(t *testing.T) {
+	m := seedNewForm(t)
+	m, _ = m.Update(sendSpecialKey(tea.KeyEnter))
+	m, _ = m.Update(sendSpecialKey(tea.KeyEsc))
+	if notice := stripANSI(tui.NoticeOf(m)); notice != "" {
+		t.Errorf("notice after Esc = %q, want empty (form cancel must clear validation error)", notice)
+	}
 }
 
 func TestNewForm_EnterWithWhitespaceBranchShowsError(t *testing.T) {
