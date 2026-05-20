@@ -93,5 +93,5 @@ To prove the loop catches the bug class it was built for, revert one of these an
 | Revert | Caught by |
 |---|---|
 | Drop `PRCache: pr.NewCache(...)` from `cmd/demo.go` (or `cmd/root.go`) | `cmd.TestDemoScript_OpenPRWithPR` — the captured frame says "no PR for feat/auth" instead of "opening …". |
-| Re-introduce `Background(colGreen)` on `livePulseStyle` in `tui/style.go` | `tui.TestGolden_PulseActive` — the SGR-42/102 guard in the test fires. (And `capture-png` of the pulse scenario shows a green block where the glyph should be.) |
+| Re-introduce `Background(colGreen)` on `livePulseStyle` in `tui/style.go` | `tui.TestGolden_PulseActive` — the SGR-42/102 guard in the test fires. (The pulse has no scripted demo replay today; the golden's ANSI snapshot is the verification path.) |
 | Revert `longestMatchingPath` filtering in `aggregator/loop.go` | `aggregator.TestSnapshot_NestedWorktreeSessionsAttributeToDeepest` — main shows a stray ●. |
