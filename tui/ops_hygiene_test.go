@@ -3,9 +3,9 @@ package tui_test
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jonasross/canopy/tui"
 )
@@ -18,24 +18,21 @@ import (
 //   - #25: error notices strip the "exit status N:" prefix and kill-signal
 //     errors include the offending PID.
 
-// TestRemoveWorktreeCmd_CancelledCtxShortCircuits proves the caller's ctx is
-// threaded into exec.CommandContext: a pre-cancelled ctx must trip the
-// subprocess immediately (well under git's normal latency) rather than the
-// old behaviour of running to completion under an internal 10s timeout.
-func TestRemoveWorktreeCmd_CancelledCtxShortCircuits(t *testing.T) {
+// TestRemoveWorktreeCmd_CancelledCtxPropagatesToExec proves the caller's ctx
+// reaches exec.CommandContext: with a pre-cancelled ctx, exec returns
+// context.Canceled before forking git, so the surfaced error is literally
+// "context canceled". Without propagation, git would still run and produce
+// its own "fatal: … is not a working tree" — distinguishable by string,
+// which is the only way to actually guard the regression (an elapsed-time
+// check alone passes in either branch because git fails fast on bad paths).
+func TestRemoveWorktreeCmd_CancelledCtxPropagatesToExec(t *testing.T) {
 	t.Setenv("CANOPY_DEMO", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	start := time.Now()
 	cmd := tui.RemoveWorktreeCmdForTestCtx(ctx, "/tmp/canopy-test-not-a-worktree")
 	msg := cmd()
-	elapsed := time.Since(start)
-
-	if elapsed > time.Second {
-		t.Errorf("removeWorktreeCmd took %s with pre-cancelled ctx (>1s) — ctx not propagated", elapsed)
-	}
 
 	// Route through Update so we don't need to peek at unexported msg fields.
 	m := tui.NewModel(&fakeRefresher{})
@@ -44,34 +41,47 @@ func TestRemoveWorktreeCmd_CancelledCtxShortCircuits(t *testing.T) {
 	if !strings.Contains(notice, "prune failed") {
 		t.Errorf("notice = %q, want 'prune failed …' (cancelled ctx must surface as a prune error)", notice)
 	}
+	if !strings.Contains(notice, "context canceled") {
+		t.Errorf("notice = %q, want 'context canceled' — exec.CommandContext only emits this when the ctx was actually propagated; git's natural failure reads 'fatal: … is not a working tree'", notice)
+	}
 }
 
-// TestCreateWorktreeCmd_CancelledCtxShortCircuits is the same propagation
-// check on createWorktreeCmd. We must run in a real git repo (otherwise the
-// validator/short-circuits run first); we set repoRoot to the current package
-// dir which is itself inside the canopy git worktree.
-func TestCreateWorktreeCmd_CancelledCtxShortCircuits(t *testing.T) {
+// TestCreateWorktreeCmd_CancelledCtxPropagatesToExec is the analogous
+// propagation check on createWorktreeCmd. repoRoot is set to a real git
+// repo (initialized in the test) so that broken code wouldn't fast-fail on
+// "not a git repository" before reaching exec — i.e. if propagation
+// regresses, we'd see git's natural "branch already exists" / cwd error,
+// not "context canceled".
+func TestCreateWorktreeCmd_CancelledCtxPropagatesToExec(t *testing.T) {
 	t.Setenv("CANOPY_DEMO", "")
+
+	repoRoot := t.TempDir()
+	if out, err := exec.Command("git", "-C", repoRoot, "init", "--initial-branch=main").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	// `git worktree add` needs at least one commit to point HEAD at. -c
+	// flags must precede the subcommand to set committer identity (the
+	// test env may not have user.email/name configured).
+	if out, err := exec.Command("git", "-C", repoRoot,
+		"-c", "user.email=t@t", "-c", "user.name=t",
+		"commit", "--allow-empty", "-m", "seed").CombinedOutput(); err != nil {
+		t.Fatalf("git seed commit: %v\n%s", err, out)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	start := time.Now()
-	// A branch name we'd never legitimately use; if the ctx is honored the
-	// command never actually runs git, so no branch is created.
-	cmd := tui.CreateWorktreeCmdForTestCtx(ctx, t.TempDir(), "feat/canopy-ctx-test", "main")
+	cmd := tui.CreateWorktreeCmdForTestCtx(ctx, repoRoot, "feat/canopy-ctx-test", "main")
 	msg := cmd()
-	elapsed := time.Since(start)
-
-	if elapsed > time.Second {
-		t.Errorf("createWorktreeCmd took %s with pre-cancelled ctx (>1s) — ctx not propagated", elapsed)
-	}
 
 	m := tui.NewModel(&fakeRefresher{})
 	m, _ = m.Update(msg)
 	notice := stripANSI(tui.NoticeOf(m))
 	if !strings.Contains(notice, "create failed") {
 		t.Errorf("notice = %q, want 'create failed …' (cancelled ctx must surface as a create error)", notice)
+	}
+	if !strings.Contains(notice, "context canceled") {
+		t.Errorf("notice = %q, want 'context canceled' — exec.CommandContext only emits this when the ctx was actually propagated; without propagation git would run against the real repo and either succeed or emit its own failure mode", notice)
 	}
 }
 
