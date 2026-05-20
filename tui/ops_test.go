@@ -31,7 +31,7 @@ func newPopulatedModel(t *testing.T) tea.Model {
 				LastCommit: git.Commit{Subject: "test", When: time.Now().Add(-5 * time.Minute)},
 			},
 			PR: &pr.PR{
-				Number: 142, State: "OPEN", CIRollup: "SUCCESS", ReviewState: "APPROVED",
+				Number: 142, State: pr.PRStateOpen, CIRollup: pr.CISuccess, ReviewState: pr.ReviewApproved,
 				URL: "https://example.com/pr/142", Title: "Test PR",
 			},
 			Procs: []procs.Process{
@@ -277,7 +277,7 @@ func TestView_MergedPRRowIsDimmed(t *testing.T) {
 		Worktree: "/r/wt-merged",
 		State: aggregator.WorktreeState{
 			Worktree: git.Worktree{Path: "/r/wt-merged", Branch: "fix/done"},
-			PR:       &pr.PR{Number: 138, State: "MERGED", URL: "https://x"},
+			PR:       &pr.PR{Number: 138, State: pr.PRStateMerged, URL: "https://x"},
 		},
 	}))
 	view := m.View()

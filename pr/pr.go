@@ -23,6 +23,36 @@ const ghPRListLimit = "100"
 var ErrNoGH = errors.New("pr: gh CLI not installed")
 var ErrNotAuthed = errors.New("pr: gh not authenticated")
 
+// PRState is the lifecycle state of a pull request (gh's `state` field).
+type PRState string
+
+const (
+	PRStateOpen   PRState = "OPEN"
+	PRStateMerged PRState = "MERGED"
+	PRStateClosed PRState = "CLOSED"
+)
+
+// CIStatus is the rolled-up CI status across all checks on a PR.
+// The empty value means "no checks reported yet" — render as neutral,
+// not as a failure.
+type CIStatus string
+
+const (
+	CIPending CIStatus = "PENDING"
+	CISuccess CIStatus = "SUCCESS"
+	CIFailure CIStatus = "FAILURE"
+)
+
+// ReviewState is the rolled-up review decision (gh's `reviewDecision`).
+// The empty value means "no review activity yet".
+type ReviewState string
+
+const (
+	ReviewApproved         ReviewState = "APPROVED"
+	ReviewChangesRequested ReviewState = "CHANGES_REQUESTED"
+	ReviewRequired         ReviewState = "REVIEW_REQUIRED"
+)
+
 // PR is the per-pull-request state surfaced by this package.
 //
 // State and IsDraft are kept separate: a draft PR is still OPEN, and
@@ -33,10 +63,10 @@ type PR struct {
 	Number      int
 	Title       string
 	HeadBranch  string
-	State       string    // OPEN / MERGED / CLOSED
+	State       PRState
 	IsDraft     bool
-	CIRollup    string    // SUCCESS / FAILURE / PENDING / "" (no checks)
-	ReviewState string    // APPROVED / CHANGES_REQUESTED / REVIEW_REQUIRED / ""
+	CIRollup    CIStatus
+	ReviewState ReviewState
 	MergedAt    time.Time // zero if not merged
 	UpdatedAt   time.Time
 	URL         string
@@ -158,10 +188,10 @@ func List(ctx context.Context, repoRoot string) ([]PR, error) {
 			Number:      r.Number,
 			Title:       r.Title,
 			HeadBranch:  r.HeadRefName,
-			State:       r.State,
+			State:       PRState(r.State),
 			IsDraft:     r.IsDraft,
 			CIRollup:    rollupCI(r.StatusCheckRollup),
-			ReviewState: r.ReviewDecision,
+			ReviewState: ReviewState(r.ReviewDecision),
 			MergedAt:    parseGHTime(r.MergedAt),
 			UpdatedAt:   parseGHTime(r.UpdatedAt),
 			URL:         r.URL,
@@ -170,21 +200,32 @@ func List(ctx context.Context, repoRoot string) ([]PR, error) {
 	return prs, nil
 }
 
+// gh check-run wire enums consumed only by rollupCI. Package-private —
+// these are gh's API shape, not Canopy's domain.
+const (
+	ghCheckInProgress = "IN_PROGRESS"
+	ghCheckQueued     = "QUEUED"
+	ghCheckPending    = "PENDING"
+	ghCheckSuccess    = "SUCCESS"
+	ghCheckSkipped    = "SKIPPED"
+	ghCheckNeutral    = "NEUTRAL"
+)
+
 // rollupCI collapses gh's statusCheckRollup array into a single
-// status string. Precedence rules:
+// CIStatus. Precedence rules:
 //
 //   - Empty array → "" (no checks attached; render as "no signal",
 //     not as a failure).
 //   - Any check still running (status IN_PROGRESS / QUEUED / PENDING)
-//     → "PENDING". Pending short-circuits over failures because a
+//     → CIPending. Pending short-circuits over failures because a
 //     pending check may still flip to success and the truthful
 //     summary is "we don't know yet."
 //   - Otherwise, if every conclusion is SUCCESS / SKIPPED / NEUTRAL
-//     → "SUCCESS". SKIPPED and NEUTRAL are treated as non-failures
+//     → CISuccess. SKIPPED and NEUTRAL are treated as non-failures
 //     per the GitHub Checks API convention.
 //   - Anything else (FAILURE, TIMED_OUT, CANCELLED, ACTION_REQUIRED,
-//     STALE, or an unknown value) → "FAILURE".
-func rollupCI(checks []ghCheckRoll) string {
+//     STALE, or an unknown value) → CIFailure.
+func rollupCI(checks []ghCheckRoll) CIStatus {
 	if len(checks) == 0 {
 		return ""
 	}
@@ -192,11 +233,11 @@ func rollupCI(checks []ghCheckRoll) string {
 	allOK := true
 	for _, c := range checks {
 		switch c.Status {
-		case "IN_PROGRESS", "QUEUED", "PENDING":
+		case ghCheckInProgress, ghCheckQueued, ghCheckPending:
 			pending = true
 		}
 		switch c.Conclusion {
-		case "SUCCESS", "SKIPPED", "NEUTRAL":
+		case ghCheckSuccess, ghCheckSkipped, ghCheckNeutral:
 		case "":
 			// Empty conclusion on a non-pending check is unexpected;
 			// treat as non-success conservatively.
@@ -208,12 +249,12 @@ func rollupCI(checks []ghCheckRoll) string {
 		}
 	}
 	if pending {
-		return "PENDING"
+		return CIPending
 	}
 	if allOK {
-		return "SUCCESS"
+		return CISuccess
 	}
-	return "FAILURE"
+	return CIFailure
 }
 
 // parseGHTime parses an RFC3339 timestamp emitted by gh. Empty input

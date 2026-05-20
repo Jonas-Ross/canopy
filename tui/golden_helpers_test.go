@@ -122,7 +122,7 @@ func scenarioFixtures() []fixtureWorktree {
 			Live:       authSess, Recent: []*sessions.Session{authSess},
 			PR: &pr.PR{
 				Number: 42, Title: "auth: bcrypt migration", HeadBranch: "feat/auth",
-				State: "OPEN", CIRollup: "SUCCESS", ReviewState: "REVIEW_REQUIRED",
+				State: pr.PRStateOpen, CIRollup: pr.CISuccess, ReviewState: pr.ReviewRequired,
 				URL: "https://example.invalid/canopy-demo/pull/42",
 			},
 		},
@@ -133,7 +133,7 @@ func scenarioFixtures() []fixtureWorktree {
 			Subject:    "dashboard: shipping screens",
 			PR: &pr.PR{
 				Number: 43, HeadBranch: "feat/dashboard",
-				State: "OPEN", IsDraft: true, CIRollup: "PENDING",
+				State: pr.PRStateOpen, IsDraft: true, CIRollup: pr.CIPending,
 				URL: "https://example.invalid/canopy-demo/pull/43",
 			},
 		},
@@ -144,7 +144,7 @@ func scenarioFixtures() []fixtureWorktree {
 			Subject:    "fix: login redirect",
 			PR: &pr.PR{
 				Number: 41, HeadBranch: "fix/login",
-				State: "MERGED", CIRollup: "SUCCESS", ReviewState: "APPROVED",
+				State: pr.PRStateMerged, CIRollup: pr.CISuccess, ReviewState: pr.ReviewApproved,
 			},
 		},
 		{
@@ -155,7 +155,7 @@ func scenarioFixtures() []fixtureWorktree {
 			Recent:     []*sessions.Session{depsSess},
 			PR: &pr.PR{
 				Number: 40, HeadBranch: "chore/deps",
-				State: "CLOSED", CIRollup: "FAILURE", ReviewState: "CHANGES_REQUESTED",
+				State: pr.PRStateClosed, CIRollup: pr.CIFailure, ReviewState: pr.ReviewChangesRequested,
 			},
 		},
 	}

@@ -109,9 +109,9 @@ func renderStatus(dirtyFiles, ahead, behind int, hasUpstream bool) string {
 // prStateGlyph returns the colored state glyph for a PR.
 func prStateGlyph(p pr.PR) string {
 	switch {
-	case p.State == "MERGED":
+	case p.State == pr.PRStateMerged:
 		return prStateMergedStyle.Render("⌧")
-	case p.State == "CLOSED":
+	case p.State == pr.PRStateClosed:
 		return prStateClosedStyle.Render("✗")
 	case p.IsDraft:
 		return prStateDraftStyle.Render("◐")
@@ -120,26 +120,26 @@ func prStateGlyph(p pr.PR) string {
 	}
 }
 
-func prCIGlyph(rollup string) string {
+func prCIGlyph(rollup pr.CIStatus) string {
 	switch rollup {
-	case "SUCCESS":
+	case pr.CISuccess:
 		return prCISuccessStyle.Render("✓")
-	case "FAILURE":
+	case pr.CIFailure:
 		return prCIFailureStyle.Render("✗")
-	case "PENDING":
+	case pr.CIPending:
 		return prCIPendingStyle.Render("⋯")
 	default:
 		return " "
 	}
 }
 
-func prReviewGlyph(state string) string {
+func prReviewGlyph(state pr.ReviewState) string {
 	switch state {
-	case "APPROVED":
+	case pr.ReviewApproved:
 		return prReviewApprStyle.Render("A")
-	case "CHANGES_REQUESTED":
+	case pr.ReviewChangesRequested:
 		return prReviewChangeStyle.Render("C")
-	case "REVIEW_REQUIRED":
+	case pr.ReviewRequired:
 		return prReviewReqStyle.Render("R")
 	default:
 		return " "
@@ -188,7 +188,7 @@ func isClaudeProc(cmd string, args []string) bool {
 }
 
 func isMergedPR(state aggregator.WorktreeState) bool {
-	return state.PR != nil && state.PR.State == "MERGED"
+	return state.PR != nil && state.PR.State == pr.PRStateMerged
 }
 
 type rowOpts struct {
