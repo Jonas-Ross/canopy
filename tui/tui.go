@@ -137,6 +137,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pulseExpiredMsg:
+		m.pulsePath = ""
+		m.pulseUntil = time.Time{}
 		return m, nil
 
 	case prOpenedMsg:

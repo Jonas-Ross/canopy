@@ -126,6 +126,52 @@ func TestEscInNormalMode_ClearsCommittedFilter(t *testing.T) {
 	}
 }
 
+// Regression: pulseExpiredMsg used to be a no-op switch arm, so m.pulsePath
+// and m.pulseUntil lingered in the Model forever after a pulse fired. The
+// View-time check (now.Before(m.pulseUntil)) kept rendering correct, but the
+// stale state was misleading and would break if the View invariant ever
+// shifted. The handler must clear both fields when the tick fires.
+func TestPulseExpiredMsg_ClearsPulseState(t *testing.T) {
+	authIdx := 1
+	m := tui.NewModel(&fakeRefresher{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	// Seed worktree without Live, then transition Live nil→non-nil so the
+	// UpdateMsg arm sets pulsePath/pulseUntil (see tui.go:120-123).
+	live := &sessions.Session{ID: "abc", Model: "claude-opus-4-7", Cwds: []string{"/repo/wt-b"}}
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/repo/wt-b",
+		State:    aggregator.WorktreeState{Worktree: newBaseWorktree("/repo/wt-b", "feat/b")},
+	}))
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/repo/wt-b",
+		State: aggregator.WorktreeState{
+			Worktree: newBaseWorktree("/repo/wt-b", "feat/b"),
+			Live:     live,
+		},
+	}))
+	_ = authIdx
+
+	// Pre-condition: pulse is armed.
+	if got := tui.PulsePathOf(m); got != "/repo/wt-b" {
+		t.Fatalf("pre-condition: pulsePath = %q, want /repo/wt-b", got)
+	}
+	if tui.PulseUntilOf(m).IsZero() {
+		t.Fatalf("pre-condition: pulseUntil is zero, want non-zero")
+	}
+
+	// The tea.Tick fires pulseExpiredMsg after pulseDuration. Drive it
+	// directly so we don't have to wait on real time.
+	m, _ = m.Update(tui.MakePulseExpiredMsg())
+
+	if got := tui.PulsePathOf(m); got != "" {
+		t.Errorf("pulsePath = %q after pulseExpiredMsg, want empty (handler must clear)", got)
+	}
+	if got := tui.PulseUntilOf(m); !got.IsZero() {
+		t.Errorf("pulseUntil = %v after pulseExpiredMsg, want zero time (handler must clear)", got)
+	}
+}
+
 func TestDetailPane_SubagentSessionsFiltered(t *testing.T) {
 	// Two sessions on the focused worktree: one top-level and one sidechain.
 	// The detail pane should only render the top-level one in the Sessions
