@@ -126,18 +126,12 @@ func TestEscInNormalMode_ClearsCommittedFilter(t *testing.T) {
 	}
 }
 
-// Regression: pulseExpiredMsg used to be a no-op switch arm, so m.pulsePath
-// and m.pulseUntil lingered in the Model forever after a pulse fired. The
-// View-time check (now.Before(m.pulseUntil)) kept rendering correct, but the
-// stale state was misleading and would break if the View invariant ever
-// shifted. The handler must clear both fields when the tick fires.
 func TestPulseExpiredMsg_ClearsPulseState(t *testing.T) {
-	authIdx := 1
 	m := tui.NewModel(&fakeRefresher{})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
-	// Seed worktree without Live, then transition Live nil→non-nil so the
-	// UpdateMsg arm sets pulsePath/pulseUntil (see tui.go:120-123).
+	// Seeding without Live first then with Live arms the pulse via the
+	// UpdateMsg nil→non-nil transition.
 	live := &sessions.Session{ID: "abc", Model: "claude-opus-4-7", Cwds: []string{"/repo/wt-b"}}
 	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
 		Worktree: "/repo/wt-b",
@@ -150,9 +144,7 @@ func TestPulseExpiredMsg_ClearsPulseState(t *testing.T) {
 			Live:     live,
 		},
 	}))
-	_ = authIdx
 
-	// Pre-condition: pulse is armed.
 	if got := tui.PulsePathOf(m); got != "/repo/wt-b" {
 		t.Fatalf("pre-condition: pulsePath = %q, want /repo/wt-b", got)
 	}
@@ -160,8 +152,6 @@ func TestPulseExpiredMsg_ClearsPulseState(t *testing.T) {
 		t.Fatalf("pre-condition: pulseUntil is zero, want non-zero")
 	}
 
-	// The tea.Tick fires pulseExpiredMsg after pulseDuration. Drive it
-	// directly so we don't have to wait on real time.
 	m, _ = m.Update(tui.MakePulseExpiredMsg())
 
 	if got := tui.PulsePathOf(m); got != "" {

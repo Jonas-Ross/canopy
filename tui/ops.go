@@ -268,7 +268,7 @@ func (m Model) updateNewWorktreeForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.mode = modeNormal
 		m.newBranchInput.Blur()
 		m.newBaseInput.Blur()
-		m.notice = "" // clear any prior validation error before kicking off create.
+		m.notice = ""
 		return m, createWorktreeCmd(m.runCtx, m.repoRoot, branch, base)
 	}
 

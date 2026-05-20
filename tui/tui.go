@@ -548,12 +548,13 @@ func (m Model) renderFooter(width int) string {
 		state, _ := m.focusedState()
 		return "  " + promptStyle.Render(fmt.Sprintf("send SIGTERM to %d procs in %s? [y/N]", len(state.Procs), FormatBranch(state.Worktree.Branch, state.Worktree.Detached)))
 	case modeNewWorktree:
-		// When a validation error is pending, surface it in place of the
-		// keybind hint — the user has already invoked Enter and needs the
-		// feedback more than the prompt.
-		trailing := keyDescStyle.Render("[tab] switch  [enter] create  [esc] cancel")
+		// A pending validation error displaces the keybind hint — once the
+		// user has invoked Enter they need the feedback more than the prompt.
+		var trailing string
 		if m.notice != "" {
 			trailing = m.notice
+		} else {
+			trailing = keyDescStyle.Render("[tab] switch  [enter] create  [esc] cancel")
 		}
 		return "  " + promptStyle.Render("new worktree") + "    " + m.newBranchInput.View() + "    " + m.newBaseInput.View() + "    " + trailing
 	}

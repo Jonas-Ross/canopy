@@ -93,12 +93,8 @@ func TestUpdate_WorktreeRemovedMsg_SuccessRemovesRowFromModel(t *testing.T) {
 	}
 }
 
-// Regression for #17: pruning the worktree the cursor is sitting on, when
-// that row is the last in the list, used to leave focusIndex == len(ordered)
-// — out of range. focusedState() guards against the crash, but renderWorktreeList
-// then finds no row matching focusIndex and the cursor glyph (▍) disappears
-// from the View until the user presses j/k. removeWorktree must clamp so the
-// cursor stays visible on the new last row.
+// Pruning the focused last row must clamp focus so the cursor glyph (▍)
+// stays visible on the new last row.
 func TestUpdate_WorktreeRemovedMsg_PruneLastFocused_KeepsCursorVisible(t *testing.T) {
 	rf := &fakeRefresher{}
 	m := tui.NewModel(rf)
