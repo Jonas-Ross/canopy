@@ -33,9 +33,10 @@ type Model struct {
 	// runCtx is the bubbletea-level lifecycle ctx, threaded through to the
 	// op cmd factories (e.g. removeWorktreeCmd) so that quit-mid-operation
 	// cancels the subprocess. NewModel defaults to context.Background();
-	// Run overrides it before tea.NewProgram. Stored on the struct because
-	// tea.Cmd factories run from inside Update, which has no other way to
-	// reach the run-level ctx.
+	// Run overrides it before tea.NewProgram. Stored on the struct (against
+	// the general "don't put contexts in structs" guidance / staticcheck
+	// SA1029) because tea.Cmd factories run from inside Update, which has
+	// no other way to reach the run-level ctx.
 	runCtx context.Context
 
 	repo     string

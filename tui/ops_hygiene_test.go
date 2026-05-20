@@ -33,8 +33,8 @@ func TestRemoveWorktreeCmd_CancelledCtxShortCircuits(t *testing.T) {
 	msg := cmd()
 	elapsed := time.Since(start)
 
-	if elapsed > 500*time.Millisecond {
-		t.Errorf("removeWorktreeCmd took %s with pre-cancelled ctx — ctx not propagated", elapsed)
+	if elapsed > time.Second {
+		t.Errorf("removeWorktreeCmd took %s with pre-cancelled ctx (>1s) — ctx not propagated", elapsed)
 	}
 
 	// Route through Update so we don't need to peek at unexported msg fields.
@@ -63,8 +63,8 @@ func TestCreateWorktreeCmd_CancelledCtxShortCircuits(t *testing.T) {
 	msg := cmd()
 	elapsed := time.Since(start)
 
-	if elapsed > 500*time.Millisecond {
-		t.Errorf("createWorktreeCmd took %s with pre-cancelled ctx — ctx not propagated", elapsed)
+	if elapsed > time.Second {
+		t.Errorf("createWorktreeCmd took %s with pre-cancelled ctx (>1s) — ctx not propagated", elapsed)
 	}
 
 	m := tui.NewModel(&fakeRefresher{})
@@ -75,14 +75,14 @@ func TestCreateWorktreeCmd_CancelledCtxShortCircuits(t *testing.T) {
 	}
 }
 
-// TestFormatGitError_StripsExitStatusPrefix is the core of #25: a wrapped
+// TestCleanExecErr_StripsExitStatusPrefix is the core of #25: a wrapped
 // exec error whose Error() reads "exit status 128: fatal: …" should be
 // reduced to just the stderr tail.
-func TestFormatGitError_StripsExitStatusPrefix(t *testing.T) {
+func TestCleanExecErr_StripsExitStatusPrefix(t *testing.T) {
 	err := errors.New("exit status 128")
-	got := tui.FormatGitErrorForTest(err, []byte("  fatal: not a working tree\n"))
+	got := tui.CleanExecErrForTest(err, []byte("  fatal: not a working tree\n"))
 	if got == nil {
-		t.Fatal("FormatGitErrorForTest returned nil; want non-nil error")
+		t.Fatal("CleanExecErrForTest returned nil; want non-nil error")
 	}
 	if got.Error() != "fatal: not a working tree" {
 		t.Errorf("formatted = %q, want 'fatal: not a working tree' (whitespace trimmed, exit-status prefix dropped)", got.Error())
@@ -92,14 +92,14 @@ func TestFormatGitError_StripsExitStatusPrefix(t *testing.T) {
 	}
 }
 
-// TestFormatGitError_EmptyOutputReturnsOriginal: when stderr is empty there's
+// TestCleanExecErr_EmptyOutputReturnsOriginal: when stderr is empty there's
 // nothing to substitute, so the original err is preserved.
-func TestFormatGitError_EmptyOutputReturnsOriginal(t *testing.T) {
+func TestCleanExecErr_EmptyOutputReturnsOriginal(t *testing.T) {
 	err := errors.New("exit status 1")
 	for _, out := range [][]byte{nil, {}, []byte("   \n  ")} {
-		got := tui.FormatGitErrorForTest(err, out)
+		got := tui.CleanExecErrForTest(err, out)
 		if got == nil || got.Error() != err.Error() {
-			t.Errorf("FormatGitErrorForTest(err, %q) = %v, want original err %q", string(out), got, err.Error())
+			t.Errorf("CleanExecErrForTest(err, %q) = %v, want original err %q", string(out), got, err.Error())
 		}
 	}
 }

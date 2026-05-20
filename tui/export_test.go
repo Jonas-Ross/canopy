@@ -49,10 +49,10 @@ func CreateWorktreeCmdForTestCtx(ctx context.Context, repoRoot, branch, base str
 	return createWorktreeCmd(ctx, repoRoot, branch, base)
 }
 
-// FormatGitErrorForTest exposes the unexported helper that strips the noisy
+// CleanExecErrForTest exposes the unexported helper that strips the noisy
 // "exit status N:" prefix from wrapped exec errors (#25).
-func FormatGitErrorForTest(err error, combinedOut []byte) error {
-	return formatGitError(err, combinedOut)
+func CleanExecErrForTest(err error, output []byte) error {
+	return cleanExecErr(err, output)
 }
 
 // WrapKillSignalErrorForTest exposes the unexported helper that annotates a

@@ -165,7 +165,7 @@ func removeWorktreeCmd(ctx context.Context, path string) tea.Cmd {
 		c := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", "--", path)
 		out, err := c.CombinedOutput()
 		if err != nil {
-			return worktreeRemovedMsg{path: path, err: formatGitError(err, out)}
+			return worktreeRemovedMsg{path: path, err: cleanExecErr(err, out)}
 		}
 		return worktreeRemovedMsg{path: path}
 	}
@@ -349,18 +349,20 @@ func createWorktreeCmd(ctx context.Context, repoRoot, branch, base string) tea.C
 		c := exec.CommandContext(ctx, "git", "-C", repoRoot, "worktree", "add", "-b", branch, "--", path, base)
 		out, err := c.CombinedOutput()
 		if err != nil {
-			return worktreeCreatedMsg{branch: branch, path: path, err: formatGitError(err, out)}
+			return worktreeCreatedMsg{branch: branch, path: path, err: cleanExecErr(err, out)}
 		}
 		return worktreeCreatedMsg{branch: branch, path: path}
 	}
 }
 
-// formatGitError drops the noisy "exit status N:" prefix that exec.ExitError
-// stringifies to, in favor of git's own stderr tail. When stderr is empty
-// (a rare hard-fail before git wrote anything) the original error is
-// preserved so the caller still sees *something*.
-func formatGitError(err error, combinedOut []byte) error {
-	tail := strings.TrimSpace(string(combinedOut))
+// cleanExecErr drops the noisy "exit status N:" prefix that exec.ExitError
+// stringifies to, in favor of the command's own stderr tail. When stderr
+// is empty (a rare hard-fail before the program wrote anything) the
+// original error is preserved so the caller still sees *something*.
+// Shared between the worktree-op cmds in this file and runCapturingStderr
+// in newtab.go.
+func cleanExecErr(err error, output []byte) error {
+	tail := strings.TrimSpace(string(output))
 	if tail == "" {
 		return err
 	}
