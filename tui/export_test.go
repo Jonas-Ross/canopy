@@ -98,3 +98,30 @@ func ProcsExpandedFor(m tea.Model, path string) bool {
 	}
 	return false
 }
+
+// NewFormFocusOf reports the new-worktree form's focused input index
+// (0 = branch, 1 = base). Returns -1 on a type-assertion miss.
+func NewFormFocusOf(m tea.Model) int {
+	if mm, ok := m.(Model); ok {
+		return mm.newFormFocus
+	}
+	return -1
+}
+
+// NewFormBranchValueOf returns the current value of the new-worktree
+// form's branch input. Returns "" on a type-assertion miss.
+func NewFormBranchValueOf(m tea.Model) string {
+	if mm, ok := m.(Model); ok {
+		return mm.newBranchInput.Value()
+	}
+	return ""
+}
+
+// NewFormBaseValueOf returns the current value of the new-worktree
+// form's base input. Returns "" on a type-assertion miss.
+func NewFormBaseValueOf(m tea.Model) string {
+	if mm, ok := m.(Model); ok {
+		return mm.newBaseInput.Value()
+	}
+	return ""
+}

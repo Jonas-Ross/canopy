@@ -8,6 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jonasross/canopy/aggregator"
+	"github.com/jonasross/canopy/pr"
 	"github.com/jonasross/canopy/tui"
 )
 
@@ -73,14 +75,26 @@ func TestSoftGate_KillProcs_DemoModeReturnsCountSuccess(t *testing.T) {
 
 func TestSoftGate_OpenURL_DemoModeSilentSuccess(t *testing.T) {
 	withDemoMode(t, func() {
-		cmd := tui.OpenURLCmdForTest("https://example.invalid/nope")
-		msg := callTeaMsg(t, cmd, 200*time.Millisecond)
+		// OpenURL's only success signal is *dismissing* the "opening …"
+		// placeholder handleOpenPR sets — asserting notice=="" on a fresh
+		// model would pass whether or not the soft-gate fired.
+		url := "https://example.invalid/pr/1"
 		m := tui.NewModel(&fakeRefresher{})
+		state := aggregator.WorktreeState{
+			Worktree: newBaseWorktree("/repo/wt-a", "feat/a"),
+			PR:       &pr.PR{Number: 1, URL: url, State: "OPEN"},
+		}
+		m, _ = m.Update(tui.UpdateMsg(aggregator.Update{Worktree: "/repo/wt-a", State: state}))
+		m, _ = m.Update(sendKey('p'))
+		if got := stripANSI(tui.NoticeOf(m)); !strings.Contains(got, "opening ") || !strings.Contains(got, url) {
+			t.Fatalf("pre-condition: notice = %q, want 'opening %s' before soft-gate fires", got, url)
+		}
+
+		cmd := tui.OpenURLCmdForTest(url)
+		msg := callTeaMsg(t, cmd, 200*time.Millisecond)
 		m, _ = m.Update(msg)
-		// prOpenedMsg with no error dismisses the "opening…" placeholder.
-		// Without that placeholder set, the notice should remain empty.
 		if notice := tui.NoticeOf(m); notice != "" {
-			t.Errorf("soft-gated openURL notice = %q, want empty", notice)
+			t.Errorf("soft-gated openURL notice = %q, want empty (placeholder dismissed)", notice)
 		}
 	})
 }

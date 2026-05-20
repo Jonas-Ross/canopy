@@ -35,16 +35,55 @@ func TestDemoScript_OpenPRWithPR(t *testing.T) {
 		t.Fatalf("demo execute: %v", err)
 	}
 
-	got, err := os.ReadFile(capture)
-	if err != nil {
-		t.Fatalf("read capture: %v", err)
-	}
-	frame := string(got)
+	frame := readCapture(t, capture)
+	assertFrameHasChrome(t, "capture", frame)
+
 	if !strings.Contains(frame, "opening ") || !strings.Contains(frame, "feat/auth") {
 		t.Errorf("captured frame missing 'opening …' notice for feat/auth.\nframe:\n%s", frame)
 	}
 	if strings.Contains(frame, "no PR for") {
 		t.Errorf("captured frame contains 'no PR' — PRCache wiring regression.\nframe:\n%s", frame)
+	}
+}
+
+// Pins the cascade-timing invariant from docs/validation.md: a capture
+// directly after a keypress snapshots pre-cascade state; capture after
+// `resolve` snapshots post-cascade. A regression that flushes pending
+// cmds on every directive would collapse the two frames into one.
+func TestDemoScript_OpenPRResolveClearsNotice(t *testing.T) {
+	demo.RequireGit(t)
+
+	tmp := t.TempDir()
+	script := filepath.Join(tmp, "open_pr_resolve.txt")
+	preCapture := filepath.Join(tmp, "pre.txt")
+	postCapture := filepath.Join(tmp, "post.txt")
+	body := "" +
+		"width 140\nheight 40\nwait 200ms\n" +
+		"key down\nkey down\nkeys p\n" +
+		"capture " + preCapture + "\n" +
+		"resolve\n" +
+		"capture " + postCapture + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o644); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	rootCmd.SetOut(&bytes.Buffer{})
+	rootCmd.SetErr(&bytes.Buffer{})
+	rootCmd.SetArgs([]string{"demo", "--script", script})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("demo execute: %v", err)
+	}
+
+	pre := readCapture(t, preCapture)
+	post := readCapture(t, postCapture)
+	assertFrameHasChrome(t, "pre-resolve", pre)
+	assertFrameHasChrome(t, "post-resolve", post)
+
+	if !strings.Contains(pre, "opening ") {
+		t.Errorf("pre-resolve frame missing 'opening …' notice — cascade fired too early:\n%s", pre)
+	}
+	if strings.Contains(post, "opening ") {
+		t.Errorf("post-resolve frame still contains 'opening …' — prOpenedMsg success arm did not dismiss the placeholder:\n%s", post)
 	}
 }
 
