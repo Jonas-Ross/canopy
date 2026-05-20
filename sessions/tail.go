@@ -441,9 +441,6 @@ func decodeTailLine(line []byte, fallbackSessionID string) (Event, bool, error) 
 	ts, _ := parseTimestamp(raw.Timestamp)
 
 	sid := fallbackSessionID
-	if raw.SessionID != "" && fallbackSessionID == "" {
-		sid = raw.SessionID
-	}
 	if sid == "" {
 		sid = raw.SessionID
 	}
