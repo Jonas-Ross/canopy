@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonasross/canopy/git"
 	"github.com/jonasross/canopy/pr"
 	"github.com/jonasross/canopy/sessions"
 )
@@ -30,6 +31,11 @@ func BenchmarkSnapshot_RealRepo(b *testing.B) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		b.Skipf("Getwd: %v", err)
+	}
+	// Skip when cwd isn't a git worktree — Snapshot would hard-fail
+	// otherwise, contradicting the skip semantics above.
+	if _, err := git.ListWorktrees(context.Background(), cwd); err != nil {
+		b.Skipf("not a git worktree at %s: %v", cwd, err)
 	}
 
 	store, err := sessions.Open(projects)
