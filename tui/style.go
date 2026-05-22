@@ -32,10 +32,12 @@ var (
 	ageStyle       = lipgloss.NewStyle().Foreground(colDim)
 	modelStyle     = lipgloss.NewStyle().Foreground(colDim)
 	liveStyle = lipgloss.NewStyle().Foreground(colGreen).Bold(true)
-	// Pulse is a brief flash: bright yellow ● for ~600ms after a fresh live
-	// event arrives. Distinct color so the glyph stays visible; no background
-	// fill (Background(colGreen) on a green glyph rendered as a solid block).
-	livePulseStyle = lipgloss.NewStyle().Foreground(colYellow).Bold(true)
+	// liveDimStyle is the off-phase of the live-indicator blink: same green
+	// glyph, no bold. The visible delta from liveStyle is brightness alone —
+	// reads as a steady "alive, breathing" rhythm rather than an alert.
+	// Background SGR codes must stay empty (Background(colGreen) on a green
+	// glyph renders as a solid block — regression guarded in golden_test.go).
+	liveDimStyle = lipgloss.NewStyle().Foreground(colGreen)
 
 	// PR state
 	prStateOpenStyle    = lipgloss.NewStyle().Foreground(colGreen)

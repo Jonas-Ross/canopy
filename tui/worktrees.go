@@ -194,7 +194,10 @@ func isMergedPR(state aggregator.WorktreeState) bool {
 type rowOpts struct {
 	branchColW int
 	width      int
-	pulse      bool
+	// blinkOn picks the live-indicator phase: true → bright bold ●,
+	// false → dim ●. Same for every Live row in a paint — all live
+	// worktrees blink in unison.
+	blinkOn bool
 }
 
 func renderRow(state aggregator.WorktreeState, branch string, focused bool, now time.Time, opts rowOpts) string {
@@ -243,9 +246,9 @@ func renderRow(state aggregator.WorktreeState, branch string, focused bool, now 
 	parts = append(parts, "  ", ageColStyle.Render(FormatRelativeTime(wt.LastCommit.When, now)))
 
 	if state.Live != nil {
-		liveGlyph := liveStyle.Render("●")
-		if opts.pulse {
-			liveGlyph = livePulseStyle.Render("●")
+		liveGlyph := liveDimStyle.Render("●")
+		if opts.blinkOn {
+			liveGlyph = liveStyle.Render("●")
 		}
 		parts = append(parts, "  ", liveGlyph, " ", modelStyle.Render(state.Live.Model))
 	}
@@ -272,8 +275,9 @@ func computeBranchColW(ordered []string, states map[string]aggregator.WorktreeSt
 }
 
 // renderWorktreeList renders visible worktrees, filtered by case-insensitive
-// branch substring. focusIndex indexes the unfiltered ordered list. pulseFor
-// is the path of a worktree whose live indicator should pulse for this paint.
+// branch substring. focusIndex indexes the unfiltered ordered list. blinkOn
+// is the current phase of the live-indicator blink — applied uniformly to
+// every Live row so all live indicators blink in unison.
 func renderWorktreeList(
 	ordered []string,
 	states map[string]aggregator.WorktreeState,
@@ -281,7 +285,7 @@ func renderWorktreeList(
 	filterStr string,
 	now time.Time,
 	width int,
-	pulseFor string,
+	blinkOn bool,
 ) string {
 	branchColW := computeBranchColW(ordered, states)
 	lowerFilter := strings.ToLower(filterStr)
@@ -298,7 +302,7 @@ func renderWorktreeList(
 		opts := rowOpts{
 			branchColW: branchColW,
 			width:      width,
-			pulse:      path == pulseFor,
+			blinkOn:    blinkOn,
 		}
 		lines = append(lines, renderRow(state, branch, rawIdx == focusIndex, now, opts))
 	}

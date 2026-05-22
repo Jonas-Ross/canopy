@@ -7,7 +7,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jonasross/canopy/aggregator"
 	"github.com/jonasross/canopy/internal/demo"
 	"github.com/jonasross/canopy/procs"
 	"github.com/jonasross/canopy/tui"
@@ -75,87 +74,62 @@ func TestGolden_NoticeNoPR(t *testing.T) {
 	assertGolden(t, "notice_no_pr", frame(m))
 }
 
-func TestGolden_PulseActive(t *testing.T) {
-	fixtures := scenarioFixtures()
-	authIdx := 1
-	withoutLive := fixtures[authIdx]
-	withoutLive.Live = nil
+// TestGolden_BlinkOnPhase pins the on-phase (bright bold green ●) frame
+// for a Live worktree. The on-phase is the default blinkPhase after a
+// Live transition; no tick-firing required.
+func TestGolden_BlinkOnPhase(t *testing.T) {
+	m := buildModel(t, scenarioFixtures(), 100, 30)
+	m = tui.SetBlinkPhaseForTest(m, true)
+	assertGolden(t, "blink_on", frame(m))
 
-	m := tui.NewModel(&fakeRefresher{})
-	m = tui.SetNow(m, frozenNow())
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	// Seed the worktree without Live first so the next Update flips Live
-	// from nil → non-nil and the pulse fires.
-	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{Worktree: withoutLive.Path, State: toState(withoutLive)}))
-	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{Worktree: fixtures[authIdx].Path, State: toState(fixtures[authIdx])}))
-
-	assertGolden(t, "pulse_active", frame(m))
-
-	// Color-regression guard: the previous incarnation of the pulse style
-	// rendered as a solid block because Foreground and Background shared the
-	// same color. Background SGR codes for green (42 / 102) must not appear.
+	// Color-regression guard: pulse-as-block (Background(colGreen) on a
+	// green glyph) must not return. Background SGR codes for green
+	// (42 / 102) must not appear.
 	raw := rawFrame(m)
 	if strings.Contains(raw, "\x1b[42m") || strings.Contains(raw, "\x1b[102m") {
-		t.Errorf("pulse raw frame contains background-green SGR (regression: pulse-as-block):\n%q", raw)
+		t.Errorf("on-phase raw frame contains background-green SGR (regression: live-as-block):\n%q", raw)
 	}
 }
 
-func TestGolden_PulseExpired(t *testing.T) {
-	fixtures := scenarioFixtures()
-	authIdx := 1
-	withoutLive := fixtures[authIdx]
-	withoutLive.Live = nil
-
-	clk := goldenClock
-	m := tui.NewModel(&fakeRefresher{})
-	m = tui.SetNow(m, func() time.Time { return clk })
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{Worktree: withoutLive.Path, State: toState(withoutLive)}))
-	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{Worktree: fixtures[authIdx].Path, State: toState(fixtures[authIdx])}))
-
-	// Advance time past pulseDuration; View should drop the pulse style.
-	clk = goldenClock.Add(2 * time.Second)
-	assertGolden(t, "pulse_expired", frame(m))
+// TestGolden_BlinkOffPhase pins the off-phase (dim non-bold green ●)
+// frame for a Live worktree. Both phases keep the column layout — only
+// the SGR changes — so the stripped goldens differ only via the SGR-aware
+// tools downstream (raw-frame test below).
+func TestGolden_BlinkOffPhase(t *testing.T) {
+	m := buildModel(t, scenarioFixtures(), 100, 30)
+	m = tui.SetBlinkPhaseForTest(m, false)
+	assertGolden(t, "blink_off", frame(m))
 }
 
-// TestPulse_RawFramesDifferAcrossActiveExpired pins the invariant the two
-// pulse goldens above only check loosely: after ANSI strip the layouts must
+// TestBlink_RawFramesDifferAcrossPhases pins the invariant the two blink
+// goldens above only check loosely: after ANSI strip the layouts must
 // match (same column widths, glyphs, branch names), but in raw form the
-// active and expired frames must differ — otherwise the pulse color isn't
-// actually being applied, even though the regression-block check passes.
-// Catches a regression where livePulseStyle drifts back toward liveStyle.
-func TestPulse_RawFramesDifferAcrossActiveExpired(t *testing.T) {
-	fixtures := scenarioFixtures()
-	authIdx := 1
-	withoutLive := fixtures[authIdx]
-	withoutLive.Live = nil
-
-	build := func(advance time.Duration) string {
-		clk := goldenClock
-		m := tui.NewModel(&fakeRefresher{})
-		m = tui.SetNow(m, func() time.Time { return clk })
-		m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-		m, _ = m.Update(tui.UpdateMsg(aggregator.Update{Worktree: withoutLive.Path, State: toState(withoutLive)}))
-		m, _ = m.Update(tui.UpdateMsg(aggregator.Update{Worktree: fixtures[authIdx].Path, State: toState(fixtures[authIdx])}))
-		clk = goldenClock.Add(advance)
+// on-phase and off-phase frames must differ — otherwise the blink style
+// isn't actually being applied. Catches a regression where liveDimStyle
+// drifts back toward liveStyle (or vice versa).
+func TestBlink_RawFramesDifferAcrossPhases(t *testing.T) {
+	build := func(phase bool) string {
+		m := buildModel(t, scenarioFixtures(), 100, 30)
+		m = tui.SetBlinkPhaseForTest(m, phase)
 		return rawFrame(m)
 	}
 
-	active := build(0)
-	expired := build(2 * time.Second)
+	on := build(true)
+	off := build(false)
 
-	if active == expired {
-		t.Fatalf("raw frames are byte-identical across active/expired pulse — color is not being applied. Active and expired must differ in raw form even though stripped layouts match.")
+	if on == off {
+		t.Fatalf("raw frames are byte-identical across on/off blink phases — style is not being applied. The two phases must differ in raw form even though stripped layouts match.")
 	}
 
-	// Belt-and-braces: the active frame must use a yellow SGR (33 or 93)
-	// somewhere; the expired one falls back to liveStyle (green). dirtyStyle
-	// also uses yellow, but the fixture here has DirtyFiles=0, so any yellow
-	// SGR in the active frame can only come from the pulse style.
-	hasYellow := strings.Contains(active, "\x1b[33m") || strings.Contains(active, "\x1b[93m") ||
-		strings.Contains(active, ";33m") || strings.Contains(active, ";93m")
-	if !hasYellow {
-		t.Errorf("active pulse frame contains no yellow SGR (33/93) — livePulseStyle may have drifted; raw=%q", active)
+	// Belt-and-braces: the on-phase frame must use a bold SGR somewhere
+	// (\x1b[1m or a combined SGR ending in ;1m / starting with 1;). The
+	// fixture's live worktree has no other bold spans on the live-glyph
+	// position, so a missing bold here means liveStyle has lost its bold
+	// or the renderer isn't switching styles. Off-phase falls back to
+	// liveDimStyle which has no bold attribute on the glyph.
+	hasBold := strings.Contains(on, "\x1b[1m") || strings.Contains(on, ";1m") || strings.Contains(on, "\x1b[1;")
+	if !hasBold {
+		t.Errorf("on-phase frame contains no bold SGR — liveStyle may have lost its bold attribute; raw=%q", on)
 	}
 }
 

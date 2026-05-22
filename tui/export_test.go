@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -34,8 +33,8 @@ func MakeShellDroppedMsg(err error) tea.Msg {
 	return shellDroppedMsg{err: err}
 }
 
-func MakePulseExpiredMsg() tea.Msg {
-	return pulseExpiredMsg{}
+func MakeBlinkTickMsg() tea.Msg {
+	return blinkTickMsg{}
 }
 
 // Cmd factories — exposed so soft-gate tests can call the cmds directly
@@ -154,20 +153,32 @@ func NewFormBaseValueOf(m tea.Model) string {
 	return ""
 }
 
-// PulsePathOf returns the worktree path currently being pulsed (or "" if
-// none). Returns "" on a type-assertion miss.
-func PulsePathOf(m tea.Model) string {
+// BlinkPhaseOf returns the current phase of the live-indicator blink:
+// true = on (bright), false = off (dim). Returns false on a type-assertion
+// miss.
+func BlinkPhaseOf(m tea.Model) bool {
 	if mm, ok := m.(Model); ok {
-		return mm.pulsePath
+		return mm.blinkPhase
 	}
-	return ""
+	return false
 }
 
-// PulseUntilOf returns the timestamp the current pulse expires at (or zero
-// time if none is active). Returns zero time on a type-assertion miss.
-func PulseUntilOf(m tea.Model) time.Time {
+// BlinkRunningOf reports whether a blink tick is currently in flight.
+// Returns false on a type-assertion miss.
+func BlinkRunningOf(m tea.Model) bool {
 	if mm, ok := m.(Model); ok {
-		return mm.pulseUntil
+		return mm.blinkRunning
 	}
-	return time.Time{}
+	return false
+}
+
+// SetBlinkPhaseForTest forces the model's blinkPhase to the given value,
+// so goldens can pin either phase deterministically without driving the
+// tick lifecycle.
+func SetBlinkPhaseForTest(m tea.Model, phase bool) tea.Model {
+	if mm, ok := m.(Model); ok {
+		mm.blinkPhase = phase
+		return mm
+	}
+	return m
 }
