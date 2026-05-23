@@ -126,8 +126,13 @@ func TestProportionalBar_cellCounts(t *testing.T) {
 		{"47 percent partial", 47, 100, 9, 10, true},
 		{"5 percent exact one cell", 5, 100, 1, 19, false},
 		{"1 percent partial", 1, 100, 0, 19, true},
-		// 1-cell floor: count > 0 but ratio * width rounds to 0
-		{"tiny ratio floors to 1 cell", 1, 10_000, 0, 19, true},
+		// Tiny ratio still produces a visible partial glyph (the smallest
+		// from horizontalBlocks). The raw.Len() == 0 floor is unreachable
+		// for these integer inputs but is kept as a safety net.
+		{"tiny ratio shows smallest partial glyph", 1, 10_000, 0, 19, true},
+		// count > totalCalls shouldn't happen but we guarantee the fill+track
+		// width invariant regardless — fill clamps to cellWidth, no overflow.
+		{"count exceeds total", 150, 100, width, 0, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -265,6 +265,11 @@ func proportionalBar(count, totalCalls, cellWidth int) (fill, track string) {
 	if fullCells > 0 {
 		raw.WriteString(strings.Repeat("█", fullCells))
 	}
+	// > 0 would fire on float-epsilon noise after exact ratios — e.g.
+	// the math floor inside count/totalCalls*cellWidth can leave a sub-
+	// epsilon residue that paints a phantom partial cell. 1e-9 is well
+	// above IEEE 754 noise (~1e-17) and well below any real fraction
+	// (smallest real frac is 1/cellWidth = 0.05 for our 20-cell bar).
 	if frac > 1e-9 && fullCells < cellWidth {
 		idx := int(frac * float64(len(horizontalBlocks)))
 		if idx >= len(horizontalBlocks) {
@@ -281,6 +286,11 @@ func proportionalBar(count, totalCalls, cellWidth int) (fill, track string) {
 		fillVisualW++
 	}
 	if fillVisualW > cellWidth {
+		// count > totalCalls shouldn't happen but we promise the fill+track
+		// width invariant — clamp both the visible string and the measurement
+		// rather than letting a bad input corrupt the row layout.
+		raw.Reset()
+		raw.WriteString(strings.Repeat("█", cellWidth))
 		fillVisualW = cellWidth
 	}
 	fill = barFillStyle.Render(raw.String())
