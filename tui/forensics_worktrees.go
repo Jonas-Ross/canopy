@@ -6,17 +6,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/jonasross/canopy/analytics"
 )
 
 // renderWorktreesView renders the worktrees sub-view: columns worktree ·
-// sessions · total time · last seen, with a footer totals row.
+// sessions · total time · last seen, with a footer totals row. A leading
+// green "●" marks worktrees with activity inside liveWindowDuration. The
+// last-seen column tints by recency (green for live/recent, foreground
+// for today, yellow for this week, dim for older).
 func renderWorktreesView(worktrees []analytics.WorktreeSummary, now time.Time, width int) string {
 	if len(worktrees) == 0 {
 		return dimStyle.Render("  no worktree data")
 	}
 
 	const (
+		markerColW   = 2  // "● " or "  "
 		worktreeColW = 24 // basename, truncated
 		sessionsColW = 8  // "sessions"
 		timeColW     = 10 // "total time"
@@ -24,10 +30,11 @@ func renderWorktreesView(worktrees []analytics.WorktreeSummary, now time.Time, w
 	)
 
 	var sb strings.Builder
-	sb.Grow(256)
+	sb.Grow(512)
 
-	// Header.
-	sb.WriteString("  ")
+	// Header — labels dim, indented to align with the data rows (the
+	// marker column eats a 2-char slot whether it shows ● or blank).
+	sb.WriteString(strings.Repeat(" ", markerColW))
 	sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", worktreeColW, "worktree")))
 	sb.WriteString("  ")
 	sb.WriteString(dimStyle.Render(fmt.Sprintf("%*s", sessionsColW, "sessions")))
@@ -44,15 +51,23 @@ func renderWorktreesView(worktrees []analytics.WorktreeSummary, now time.Time, w
 		name := truncateWithEllipsis(filepath.Base(wt.Path), worktreeColW)
 		dur := formatTotalTime(wt.TotalTime)
 		last := FormatRelativeTime(wt.LastSeen, now)
+		age := now.Sub(wt.LastSeen)
 
+		// Live marker: ● (green) if active in the last LiveWindow, else
+		// blank space to preserve column alignment.
+		if !wt.LastSeen.IsZero() && age < liveWindowDuration {
+			sb.WriteString(liveStyle.Render("●"))
+			sb.WriteByte(' ')
+		} else {
+			sb.WriteString(strings.Repeat(" ", markerColW))
+		}
+		sb.WriteString(repoStyle.Render(fmt.Sprintf("%-*s", worktreeColW, name)))
 		sb.WriteString("  ")
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", worktreeColW, name)))
+		sb.WriteString(detailValueStyle.Render(fmt.Sprintf("%*d", sessionsColW, wt.SessionCount)))
 		sb.WriteString("  ")
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("%*d", sessionsColW, wt.SessionCount)))
+		sb.WriteString(detailValueStyle.Render(fmt.Sprintf("%*s", timeColW, dur)))
 		sb.WriteString("  ")
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("%*s", timeColW, dur)))
-		sb.WriteString("  ")
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", lastSeenColW, last)))
+		sb.WriteString(lastSeenStyle(age, wt.LastSeen).Render(fmt.Sprintf("%-*s", lastSeenColW, last)))
 		sb.WriteByte('\n')
 
 		totSessions += wt.SessionCount
@@ -60,22 +75,39 @@ func renderWorktreesView(worktrees []analytics.WorktreeSummary, now time.Time, w
 	}
 
 	// Footer rule + totals.
-	ruleLen := worktreeColW + sessionsColW + timeColW + lastSeenColW + 10
-	if ruleLen < 1 {
-		ruleLen = 60
-	}
+	ruleLen := markerColW + worktreeColW + sessionsColW + timeColW + lastSeenColW + 8
 	sb.WriteString("  ")
 	sb.WriteString(ruleStyle.Render(strings.Repeat("─", ruleLen)))
 	sb.WriteByte('\n')
 
-	sb.WriteString("  ")
+	sb.WriteString(strings.Repeat(" ", markerColW))
 	sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", worktreeColW, "total")))
 	sb.WriteString("  ")
-	sb.WriteString(dimStyle.Render(fmt.Sprintf("%*d", sessionsColW, totSessions)))
+	sb.WriteString(detailValueStyle.Render(fmt.Sprintf("%*d", sessionsColW, totSessions)))
 	sb.WriteString("  ")
-	sb.WriteString(dimStyle.Render(fmt.Sprintf("%*s", timeColW, formatTotalTime(totTime))))
+	sb.WriteString(detailValueStyle.Render(fmt.Sprintf("%*s", timeColW, formatTotalTime(totTime))))
 
 	return sb.String()
+}
+
+// lastSeenStyle picks a recency-tinted style for the last-seen column.
+// Green for live/recent, foreground for today, yellow for this week, dim
+// for older. A zero LastSeen falls through to dim ("never seen").
+func lastSeenStyle(age time.Duration, lastSeen time.Time) lipgloss.Style {
+	switch {
+	case lastSeen.IsZero():
+		return dimStyle
+	case age < liveWindowDuration:
+		return liveStyle
+	case age < time.Hour:
+		return liveDimStyle
+	case age < 24*time.Hour:
+		return detailValueStyle
+	case age < 7*24*time.Hour:
+		return dirtyStyle
+	default:
+		return dimStyle
+	}
 }
 
 // formatTotalTime formats a duration as "Xh Ym" or "Xm".

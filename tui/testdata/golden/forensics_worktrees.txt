@@ -3,8 +3,8 @@
   tools · worktrees · spend · sessions
 
   worktree                  sessions  total time  last seen
-  feat+auth                        3      2h 27m  now
-  repo                             3       2h 0m  1m
+● feat+auth                        3      2h 27m  now
+● repo                             3       2h 0m  1m
   chore+deps                       2      1h 38m  1d
   fix+login                        0          0m  3d
   ──────────────────────────────────────────────────────────────
