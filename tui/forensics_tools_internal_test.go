@@ -136,7 +136,7 @@ func TestProportionalBar_cellCounts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fill, track := proportionalBar(tt.count, tt.total, width)
+			fill, track := proportionalBar(tt.count, tt.total, width, dimStyle)
 			plainFill := ansi.Strip(fill)
 			plainTrack := ansi.Strip(track)
 			gotFull := strings.Count(plainFill, "█")
@@ -173,4 +173,34 @@ func runeCount(s string) int {
 		n++
 	}
 	return n
+}
+
+func TestPrettyModelName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"claude-opus-4-7", "Opus 4.7"},
+		{"claude-sonnet-4-6", "Sonnet 4.6"},
+		{"claude-haiku-4-5", "Haiku 4.5"},
+		// Date suffix is dropped.
+		{"claude-haiku-4-5-20251001", "Haiku 4.5"},
+		// Sub-revision suffix is also dropped.
+		{"claude-opus-4-7-experimental", "Opus 4.7"},
+		// Non-claude names pass through unchanged (no transform).
+		{"some-custom-model", "some-custom-model"},
+		{"plain", "plain"},
+		{"", ""},
+		// claude-prefixed but malformed (too few segments) — pass through.
+		{"claude-only", "claude-only"},
+		{"claude-opus", "claude-opus"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := prettyModelName(tt.input)
+			if got != tt.want {
+				t.Errorf("prettyModelName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
 }

@@ -54,7 +54,7 @@ func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string
 
 		sessCount := sessionCountByModel[model]
 		sb.WriteString("  ")
-		sb.WriteString(tabActive.Render(model))
+		sb.WriteString(tabActive.Render(prettyModelName(model)))
 		sb.WriteString(dimStyle.Render(fmt.Sprintf("    %d sessions · %s calls",
 			sessCount, formatWithCommas(totalCalls))))
 		sb.WriteByte('\n')
@@ -90,7 +90,7 @@ func renderToolRow(name string, count, totalCalls int) string {
 	)
 	tag, tagStyle := categorizeTool(name)
 	display := formatToolName(name, nameColW)
-	fill, track := proportionalBar(count, totalCalls, barW)
+	fill, track := proportionalBar(count, totalCalls, barW, tagStyle)
 	pct := 0
 	if totalCalls > 0 {
 		pct = (count * 100) / totalCalls
@@ -214,9 +214,11 @@ var horizontalBlocks = []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
 // proportionalBar returns the bar fill and dim track for a row, padded
 // to exactly cellWidth visual cells total.
 //
-// Layout: zero or more "█" cells (cyan via barFillStyle) optionally
-// followed by ONE partial-block glyph (also cyan); the remainder is
+// Layout: zero or more "█" cells (rendered via fillStyle) optionally
+// followed by ONE partial-block glyph (same style); the remainder is
 // "░" cells (dim via dimStyle). Visual width of fill+track == cellWidth.
+// fillStyle is the caller's choice — the tools view passes the row's
+// category tag style so the bar color matches the tag color.
 //
 // Special cases:
 //   - count == 0 (regardless of total): no fill, full-width dim track.
@@ -224,7 +226,7 @@ var horizontalBlocks = []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
 //     ("present but tiny" beats invisible).
 //
 // totalCalls == 0 is treated as no-data — same as count == 0.
-func proportionalBar(count, totalCalls, cellWidth int) (fill, track string) {
+func proportionalBar(count, totalCalls, cellWidth int, fillStyle lipgloss.Style) (fill, track string) {
 	if cellWidth <= 0 {
 		return "", ""
 	}
@@ -263,12 +265,37 @@ func proportionalBar(count, totalCalls, cellWidth int) (fill, track string) {
 		raw.WriteString(strings.Repeat("█", cellWidth))
 		fillVisualW = cellWidth
 	}
-	fill = barFillStyle.Render(raw.String())
+	fill = fillStyle.Render(raw.String())
 	trackW := cellWidth - fillVisualW
 	if trackW > 0 {
 		track = dimStyle.Render(strings.Repeat("░", trackW))
 	}
 	return fill, track
+}
+
+// prettyModelName converts an internal model identifier into a display
+// form: "claude-opus-4-7" → "Opus 4.7", "claude-haiku-4-5-20251001" →
+// "Haiku 4.5". The leading "claude-" is stripped, the family is
+// title-cased, and the first two version segments are joined with ".";
+// any further suffix (date stamps, etc.) is dropped.
+//
+// Falls back to the raw name if the pattern doesn't match — keeps
+// custom or unexpected model identifiers visible rather than mangling
+// them.
+func prettyModelName(name string) string {
+	rest, ok := strings.CutPrefix(name, "claude-")
+	if !ok {
+		return name
+	}
+	parts := strings.Split(rest, "-")
+	if len(parts) < 3 {
+		return name
+	}
+	family, major, minor := parts[0], parts[1], parts[2]
+	if family == "" || major == "" || minor == "" {
+		return name
+	}
+	return strings.ToUpper(family[:1]) + family[1:] + " " + major + "." + minor
 }
 
 // formatWithCommas formats an integer with comma thousands separators.

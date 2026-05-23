@@ -15,13 +15,14 @@ func TestForensicsToolsView_golden(t *testing.T) {
 }
 
 // TestForensicsToolsView_modelHeadersPresent verifies both model section
-// headers appear in the tools view.
+// headers appear in the tools view, in their display form (claude-opus-4-7
+// renders as "Opus 4.7" per prettyModelName).
 func TestForensicsToolsView_modelHeadersPresent(t *testing.T) {
 	m := buildAnalyticsModel(t, tui.ViewTools, scenarioAnalytics())
 	view := stripANSI(m.View())
-	for _, model := range []string{"claude-opus-4-7", "claude-sonnet-4-6"} {
-		if !strings.Contains(view, model) {
-			t.Errorf("tools view missing model header %q; view=\n%s", model, view)
+	for _, header := range []string{"Opus 4.7", "Sonnet 4.6"} {
+		if !strings.Contains(view, header) {
+			t.Errorf("tools view missing model header %q; view=\n%s", header, view)
 		}
 	}
 }
