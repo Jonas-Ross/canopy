@@ -1,0 +1,19 @@
+# Open the forensics tab and capture each sub-view.
+width 140
+height 40
+wait 200ms
+key tab
+wait 200ms
+capture /tmp/canopy-forensics-spend.ansi
+keys 2
+wait 100ms
+capture /tmp/canopy-forensics-sessions.ansi
+keys 3
+wait 100ms
+capture /tmp/canopy-forensics-tools.ansi
+keys 4
+wait 100ms
+capture /tmp/canopy-forensics-worktrees.ansi
+key tab
+wait 100ms
+capture /tmp/canopy-back-to-ops.ansi
