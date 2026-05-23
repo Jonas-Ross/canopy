@@ -38,7 +38,7 @@ const (
 // the moment the notice ("opening …", "no PR for main", etc.) is visible.
 // We therefore queue any tea.Cmd returned from Update and flush it only at a
 // `wait` directive or end-of-script. The flush executes with a short timeout
-// so timer-based commands (tea.Tick for pulse expiry) don't block.
+// so timer-based commands (tea.Tick for the blink chain) don't block.
 func runScript(ctx context.Context, cmd *cobra.Command, agg *aggregator.Aggregator, scriptPath string, width, height int) error {
 	directives, err := parseScript(scriptPath)
 	if err != nil {

@@ -23,8 +23,11 @@ type Refresher interface {
 // UpdateMsg wraps an aggregator.Update for delivery via tea.Program.Send.
 type UpdateMsg aggregator.Update
 
-// pulseDuration is how long a freshly-arrived live update is highlighted.
-const pulseDuration = 600 * time.Millisecond
+// blinkInterval is the half-period of the live-indicator blink. The tick
+// fires every interval and toggles m.blinkPhase, so full on/off cycle is
+// 2 * blinkInterval. Tuned by eye against canopy demo — 1s reads as a calm
+// breathing rhythm; faster feels restless, slower feels sluggish.
+const blinkInterval = 1 * time.Second
 
 // Model is the root bubbletea model. Update is pure: I/O lives in Run.
 type Model struct {
@@ -61,8 +64,13 @@ type Model struct {
 
 	notice string
 
-	pulsePath  string
-	pulseUntil time.Time
+	// blinkPhase is the current phase of the live-indicator blink: true =
+	// on (bright green ●), false = off (dim green ●). Toggled by the
+	// self-rescheduling blinkTickMsg; the renderer reads it to pick a style.
+	// blinkRunning gates against double-starting the tick when a second
+	// Live worktree arrives while the first is still ticking.
+	blinkPhase   bool
+	blinkRunning bool
 
 	procsExpanded map[string]bool
 
@@ -116,10 +124,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = errorStyle.Render(u.SystemNotice)
 			return m, nil
 		}
-		prev, existed := m.states[u.Worktree]
+		_, existed := m.states[u.Worktree]
 		if !existed {
 			m.ordered = append(m.ordered, u.Worktree)
 		}
+		// Snapshot the no-Live → some-Live transition before mutating the
+		// state map, so a fresh arrival can reset blinkPhase even when a
+		// stale tick is still in flight (blinkRunning=true) from a previous
+		// Live that has since dropped.
+		prevAnyLive := m.anyLive()
 		m.states[u.Worktree] = u.State
 		if m.repo == "" && u.State.Repo.Name != "" {
 			m.repo = u.State.Repo.Name
@@ -127,24 +140,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.repoRoot == "" && u.State.Repo.Root != "" {
 			m.repoRoot = u.State.Repo.Root
 		}
-		// Pulse only on subsequent updates — initial load delivers all
-		// existing live sessions in one burst and shouldn't flash them.
-		if existed && u.State.Live != nil && (prev.Live == nil || u.State.Live.UpdatedAt.After(prev.Live.UpdatedAt)) {
-			m.pulsePath = u.Worktree
-			m.pulseUntil = m.now().Add(pulseDuration)
-			return m, tea.Tick(pulseDuration, func(time.Time) tea.Msg { return pulseExpiredMsg{} })
+		// Reset blinkPhase to bright whenever a worktree transitions the
+		// model from "no Live anywhere" to "some Live" — guarantees the
+		// first paint of a freshly-arrived Live row is on-phase regardless
+		// of where the in-flight tick chain is. Kick the tick when no chain
+		// is running yet; otherwise the existing chain picks up the new
+		// worktree on its next fire.
+		if u.State.Live != nil && !prevAnyLive {
+			m.blinkPhase = true
+			if !m.blinkRunning {
+				m.blinkRunning = true
+				return m, tea.Tick(blinkInterval, func(time.Time) tea.Msg { return blinkTickMsg{} })
+			}
 		}
 		return m, nil
 
-	case pulseExpiredMsg:
-		// Bursty live updates can schedule a later tick that extends pulseUntil
-		// past this tick's deadline. Only clear when the window has actually
-		// elapsed — a still-fresh pulse keeps running until its own tick fires.
-		if m.now().Before(m.pulseUntil) {
-			return m, nil
+	case blinkTickMsg:
+		// Toggle the phase, then reschedule only if some worktree is still
+		// Live. When the last Live worktree drops, the tick self-terminates
+		// and idle CPU returns to baseline.
+		m.blinkPhase = !m.blinkPhase
+		if m.anyLive() {
+			return m, tea.Tick(blinkInterval, func(time.Time) tea.Msg { return blinkTickMsg{} })
 		}
-		m.pulsePath = ""
-		m.pulseUntil = time.Time{}
+		m.blinkRunning = false
 		return m, nil
 
 	case prOpenedMsg:
@@ -435,6 +454,17 @@ func (m Model) toggleFocusedProcsExpansion() Model {
 	return m
 }
 
+// anyLive reports whether at least one tracked worktree has a live session.
+// Used by the blink tick to decide whether to reschedule itself.
+func (m Model) anyLive() bool {
+	for _, s := range m.states {
+		if s.Live != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Model) activeFilter() string {
 	if m.mode == modeFiltering {
 		return m.filterInput.Value()
@@ -471,11 +501,6 @@ func (m Model) View() string {
 
 	title := m.renderTitleBar(width)
 
-	pulseFor := ""
-	if !m.pulseUntil.IsZero() && now.Before(m.pulseUntil) {
-		pulseFor = m.pulsePath
-	}
-
 	// Compute the list's effective width — it shrinks when the detail pane is
 	// visible so column-visibility gates fire against the actual list area.
 	listW := width
@@ -489,7 +514,7 @@ func (m Model) View() string {
 		}
 	}
 
-	list := renderWorktreeList(m.ordered, m.states, m.focusIndex, m.activeFilter(), now, listW, pulseFor)
+	list := renderWorktreeList(m.ordered, m.states, m.focusIndex, m.activeFilter(), now, listW, m.blinkPhase)
 
 	footer := m.renderFooter(width)
 
@@ -644,7 +669,8 @@ func FilterValue(m tea.Model) string {
 }
 
 // SetNow replaces a Model's clock function. Test-only — used by the golden
-// frame harness to freeze time so pulse/notice rendering is deterministic.
+// frame harness to freeze time so relative-time and notice rendering is
+// deterministic.
 func SetNow(m tea.Model, fn func() time.Time) tea.Model {
 	if mm, ok := m.(Model); ok {
 		mm.now = fn

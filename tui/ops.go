@@ -53,7 +53,9 @@ type procsKilledMsg struct {
 	err     error
 }
 
-type pulseExpiredMsg struct{}
+// blinkTickMsg fires on the self-rescheduling blink timer. The Update arm
+// toggles m.blinkPhase and reschedules iff some worktree is still Live.
+type blinkTickMsg struct{}
 
 // isDemoMode reports whether the binary is running under `canopy demo`. The
 // flag short-circuits any operation that would otherwise touch the user's

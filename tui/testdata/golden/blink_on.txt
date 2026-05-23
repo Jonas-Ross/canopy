@@ -1,0 +1,28 @@
+── Canopy · canopy-demo ───────────────────────────────────────────────────────────── ops · forensics ──
+
+ ▍ ⌂ main                                                    2h
+     feat/auth                 ↑1 ↓1         #42 ○ ✓ R       35m     ● claude-opus-4-7
+     feat/dashboard            ~3 ↓1         #43 ◐ ⋯         3h
+     fix/login                 ↓1            #41 ⌧ ✓ A       1d
+     chore/deps                ↑2 ↓1         #40 ✗ ✗ C       3d
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k nav  ·  ⏎ shell  ·  n new  ·  p PR  ·  P procs  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─

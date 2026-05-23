@@ -25,7 +25,7 @@ rendering is opt-in for visual review.
    canopy demo --script=tui/testdata/scripts/<scenario>.txt
    ```
    The script's `capture` directives write text frames to the paths it names. Read the files.
-4. **For visual-style questions** (was this rendered with the right colour? does the pulse glyph actually appear or is it a solid block?), add a `capture-png` directive and point it at a `.png`:
+4. **For visual-style questions** (was this rendered with the right colour? does the live-indicator blink glyph actually appear or is it a solid block?), add a `capture-png` directive and point it at a `.png`:
    ```
    capture-png /tmp/check.png
    ```
@@ -93,5 +93,6 @@ To prove the loop catches the bug class it was built for, revert one of these an
 | Revert | Caught by |
 |---|---|
 | Drop `PRCache: pr.NewCache(...)` from `cmd/demo.go` (or `cmd/root.go`) | `cmd.TestDemoScript_OpenPRWithPR` — the captured frame says "no PR for feat/auth" instead of "opening …". |
-| Re-introduce `Background(colGreen)` on `livePulseStyle` in `tui/style.go` | `tui.TestGolden_PulseActive` — the SGR-42/102 guard in the test fires. (The pulse has no scripted demo replay today; the golden's ANSI snapshot is the verification path.) |
+| Re-introduce `Background(colGreen)` on `liveStyle` or `liveDimStyle` in `tui/style.go` | `tui.TestGolden_BlinkOnPhase` — the SGR-42/102 guard in the test fires. (The blink has no scripted demo replay today; the golden's ANSI snapshot is the verification path.) |
+| Drop `.Bold(true)` from `liveStyle` so on- and off-phase render identically | `tui.TestBlink_RawFramesDifferAcrossPhases` — the on-phase frame must contain a bold SGR that the off-phase lacks. |
 | Revert `longestMatchingPath` filtering in `aggregator/loop.go` | `aggregator.TestSnapshot_NestedWorktreeSessionsAttributeToDeepest` — main shows a stray ●. |
