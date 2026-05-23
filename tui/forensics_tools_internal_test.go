@@ -116,7 +116,7 @@ func TestProportionalBar_cellCounts(t *testing.T) {
 		count     int
 		total     int
 		wantFull  int // count of full block "█" cells
-		wantTrack int // count of dim track "░" cells
+		wantTrack int // count of trailing space-pad cells
 		wantPart  bool
 	}{
 		{"zero count zero total", 0, 0, 0, width, false},
@@ -140,7 +140,7 @@ func TestProportionalBar_cellCounts(t *testing.T) {
 			plainFill := ansi.Strip(fill)
 			plainTrack := ansi.Strip(track)
 			gotFull := strings.Count(plainFill, "█")
-			gotTrack := strings.Count(plainTrack, "░")
+			gotTrack := strings.Count(plainTrack, " ")
 			gotPart := false
 			for _, r := range plainFill {
 				if r != '█' {

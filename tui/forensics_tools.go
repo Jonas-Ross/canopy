@@ -211,17 +211,18 @@ func formatToolName(name string, maxWidth int) string {
 // "█" is rendered separately (see proportionalBar).
 var horizontalBlocks = []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
 
-// proportionalBar returns the bar fill and dim track for a row, padded
-// to exactly cellWidth visual cells total.
+// proportionalBar returns the bar fill and the trailing padding for a
+// row, sized so fill+track is exactly cellWidth visual cells total.
 //
 // Layout: zero or more "█" cells (rendered via fillStyle) optionally
 // followed by ONE partial-block glyph (same style); the remainder is
-// "░" cells (dim via dimStyle). Visual width of fill+track == cellWidth.
-// fillStyle is the caller's choice — the tools view passes the row's
-// category tag style so the bar color matches the tag color.
+// invisible space padding that preserves column alignment for the
+// downstream count and percent columns. fillStyle is the caller's
+// choice — the tools view passes the row's category tag style so the
+// bar color matches the tag color.
 //
 // Special cases:
-//   - count == 0 (regardless of total): no fill, full-width dim track.
+//   - count == 0 (regardless of total): no fill, full-width blank pad.
 //   - count > 0 but ratio rounds to zero cells: a single "▏" fill cell
 //     ("present but tiny" beats invisible).
 //
@@ -231,7 +232,7 @@ func proportionalBar(count, totalCalls, cellWidth int, fillStyle lipgloss.Style)
 		return "", ""
 	}
 	if count <= 0 || totalCalls <= 0 {
-		return "", dimStyle.Render(strings.Repeat("░", cellWidth))
+		return "", strings.Repeat(" ", cellWidth)
 	}
 	pos := float64(count) / float64(totalCalls) * float64(cellWidth)
 	fullCells := int(pos)
@@ -268,7 +269,7 @@ func proportionalBar(count, totalCalls, cellWidth int, fillStyle lipgloss.Style)
 	fill = fillStyle.Render(raw.String())
 	trackW := cellWidth - fillVisualW
 	if trackW > 0 {
-		track = dimStyle.Render(strings.Repeat("░", trackW))
+		track = strings.Repeat(" ", trackW)
 	}
 	return fill, track
 }
