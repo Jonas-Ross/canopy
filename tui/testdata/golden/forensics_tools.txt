@@ -3,17 +3,17 @@
   spend · sessions · tools · worktrees
 
   claude-opus-4-7    7 sessions · 1,847 calls
-    Bash    ████████████████████    812   43%
-    Read    ███████████             487   26%
-    Edit    ███████                 295   15%
-    Grep    ███                     153    8%
-    Write   █                        75    4%
-    other   █                        25    1%
+    exec  Bash                  ████████▊░░░░░░░░░░░     812   43%
+    file  Read                  █████▎░░░░░░░░░░░░░░     487   26%
+    file  Edit                  ███▎░░░░░░░░░░░░░░░░     295   15%
+    file  Grep                  █▋░░░░░░░░░░░░░░░░░░     153    8%
+    file  Write                 ▊░░░░░░░░░░░░░░░░░░░      75    4%
+    ·     other                 ▎░░░░░░░░░░░░░░░░░░░      25    1%
 
   claude-sonnet-4-6    5 sessions · 372 calls
-    Bash    ████████████████████    189   50%
-    Read    ██████████               97   26%
-    Edit    █████████                86   23%
+    exec  Bash                  ██████████▎░░░░░░░░░     189   50%
+    file  Read                  █████▎░░░░░░░░░░░░░░      97   26%
+    file  Edit                  ████▋░░░░░░░░░░░░░░░      86   23%
 
 
 

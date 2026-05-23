@@ -9,16 +9,15 @@ import (
 	"github.com/jonasross/canopy/analytics"
 )
 
-const (
-	toolBarWidth    = 20 // max cells for bar in tools view
-	topToolsPerModel = 5 // show top N tools before "other"
-)
+const topToolsPerModel = 5 // show top N tools before "other"
 
-// renderToolsView renders the tools sub-view: per-model section header,
-// top-5 tool bars, and an "other" row collapsing the remainder.
-// sessionCountByModel must reflect the FULL analytics window — passing the
-// length-capped Snapshot.Sessions here would undercount models whose
-// session counts exceed recentSessionsLimit.
+// renderToolsView renders the tools sub-view: one section per model, with
+// a colored type tag, simplified tool name, proportional bar, count, and
+// percent for each of the top 5 tools, plus a dim "other" rollup row.
+//
+// sessionCountByModel must reflect the FULL analytics window — passing
+// the length-capped Snapshot.Sessions here would undercount models
+// whose session counts exceed recentSessionsLimit.
 func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string]int, width int) string {
 	if len(tools) == 0 {
 		return dimStyle.Render("  no tool data")
@@ -32,8 +31,6 @@ func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string
 	for _, t := range tools {
 		byModel[t.Model] = append(byModel[t.Model], toolRow{tool: t.Tool, count: t.Count})
 	}
-	// Tools are already sorted (Model asc, Count desc) per Snapshot contract,
-	// so we just need the sorted model list.
 	models := make([]string, 0, len(byModel))
 	for m := range byModel {
 		models = append(models, m)
@@ -41,7 +38,7 @@ func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string
 	sort.Strings(models)
 
 	var sb strings.Builder
-	sb.Grow(512)
+	sb.Grow(1024)
 
 	for mi, model := range models {
 		if mi > 0 {
@@ -49,23 +46,19 @@ func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string
 		}
 		rows := byModel[model]
 
-		// Compute total calls for this model.
 		totalCalls := 0
 		for _, r := range rows {
 			totalCalls += r.count
 		}
 
 		sessCount := sessionCountByModel[model]
-		header := fmt.Sprintf("%s    %d sessions · %s calls",
-			model,
-			sessCount,
-			formatWithCommas(totalCalls),
-		)
+		// Header: bold cyan model name, dim "N sessions · M calls" subtitle.
 		sb.WriteString("  ")
-		sb.WriteString(dimStyle.Render(header))
+		sb.WriteString(tabActive.Render(model))
+		sb.WriteString(dimStyle.Render(fmt.Sprintf("    %d sessions · %s calls",
+			sessCount, formatWithCommas(totalCalls))))
 		sb.WriteByte('\n')
 
-		// Top N tools + "other" collapse.
 		topN := topToolsPerModel
 		if topN > len(rows) {
 			topN = len(rows)
@@ -73,70 +66,54 @@ func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string
 		topRows := rows[:topN]
 		otherRows := rows[topN:]
 
-		// Find max count among displayed rows for normalization.
-		maxCount := 0
 		for _, r := range topRows {
-			if r.count > maxCount {
-				maxCount = r.count
-			}
+			sb.WriteString(renderToolRow(r.tool, r.count, totalCalls))
 		}
-
-		for _, r := range topRows {
-			bar := toolBar(r.count, maxCount)
-			pct := 0
-			if totalCalls > 0 {
-				pct = (r.count * 100) / totalCalls
-			}
-			sb.WriteString("    ")
-			sb.WriteString(dimStyle.Render(fmt.Sprintf("%-8s", r.tool)))
-			sb.WriteString(bar)
-			sb.WriteString("  ")
-			sb.WriteString(dimStyle.Render(fmt.Sprintf("%5d  %3d%%", r.count, pct)))
-			sb.WriteByte('\n')
-		}
-
-		// "other" row.
 		if len(otherRows) > 0 {
 			otherCount := 0
 			for _, r := range otherRows {
 				otherCount += r.count
 			}
-			bar := toolBar(otherCount, maxCount)
-			pct := 0
-			if totalCalls > 0 {
-				pct = (otherCount * 100) / totalCalls
-			}
-			sb.WriteString("    ")
-			sb.WriteString(dimStyle.Render(fmt.Sprintf("%-8s", "other")))
-			sb.WriteString(bar)
-			sb.WriteString("  ")
-			sb.WriteString(dimStyle.Render(fmt.Sprintf("%5d  %3d%%", otherCount, pct)))
-			sb.WriteByte('\n')
+			sb.WriteString(renderToolRow("other", otherCount, totalCalls))
 		}
 	}
-
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// toolBar returns a filled bar of up to toolBarWidth cells, normalized over
-// maxCount. Uses full-block (█) character. The cells cap matters for the
-// "other" rollup row: that row's count is the sum of all non-top-5 tools
-// and can exceed maxCount (which is the single highest individual top-5
-// count), which would otherwise produce a negative pad width and panic.
-func toolBar(count, maxCount int) string {
-	if maxCount == 0 || count == 0 {
-		return dimStyle.Render("▏" + strings.Repeat(" ", toolBarWidth-1))
+// renderToolRow renders a single tool row including indent, type tag,
+// formatted name, proportional bar, count, and percent. The "other"
+// rollup row passes name="other" and gets the dim · tag automatically.
+func renderToolRow(name string, count, totalCalls int) string {
+	const (
+		nameColW = 20
+		barW     = 20
+	)
+	tag, tagStyle := categorizeTool(name)
+	if name == "other" {
+		tag, tagStyle = "·", toolTagDimStyle
 	}
-	cells := (count * toolBarWidth) / maxCount
-	if cells < 1 {
-		cells = 1
+	display := formatToolName(name, nameColW)
+	fill, track := proportionalBar(count, totalCalls, barW)
+	pct := 0
+	if totalCalls > 0 {
+		pct = (count * 100) / totalCalls
 	}
-	if cells > toolBarWidth {
-		cells = toolBarWidth
-	}
-	bar := strings.Repeat("█", cells)
-	pad := strings.Repeat(" ", toolBarWidth-cells)
-	return tabActive.Render(bar) + dimStyle.Render(pad)
+
+	var sb strings.Builder
+	sb.WriteString("    ") // 4-sp row indent
+	sb.WriteString(tagStyle.Render(fmt.Sprintf("%-4s", tag)))
+	sb.WriteString("  ")
+	// Name column: foreground text, left-aligned, padded to nameColW.
+	sb.WriteString(fmt.Sprintf("%-*s", nameColW, display))
+	sb.WriteString("  ")
+	sb.WriteString(fill)
+	sb.WriteString(track)
+	sb.WriteString("  ")
+	sb.WriteString(fmt.Sprintf("%6d", count))
+	sb.WriteString("  ")
+	sb.WriteString(dimStyle.Render(fmt.Sprintf("%3d%%", pct)))
+	sb.WriteByte('\n')
+	return sb.String()
 }
 
 // categorizeTool maps a tool name to its (tag, style) pair for the
