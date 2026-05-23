@@ -34,6 +34,8 @@ go.work.sum
 *.swo
 .worktrees/
 .claude/issue-runs/
+.claude/settings.local.json
+.claude/worktrees/
 
 # canopy demo capture-png outputs — generated on demand, never committed.
 # Scope-limited so future legit PNGs (e.g. docs/images/) aren't shadowed.
