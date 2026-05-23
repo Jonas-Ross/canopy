@@ -232,6 +232,65 @@ func formatToolName(name string, maxWidth int) string {
 	return prefix + action[:head] + "…" + action[len(action)-tail:]
 }
 
+// horizontalBlocks are the unicode left-block glyphs used for the trailing
+// partial cell of a proportional bar, from lightest (1/8 cell) to fullest
+// (7/8 cell). Index 0 maps to the smallest visible fill; the full block
+// "█" is rendered separately (see proportionalBar).
+var horizontalBlocks = []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
+
+// proportionalBar returns the bar fill and dim track for a row, padded
+// to exactly cellWidth visual cells total.
+//
+// Layout: zero or more "█" cells (cyan via barFillStyle) optionally
+// followed by ONE partial-block glyph (also cyan); the remainder is
+// "░" cells (dim via dimStyle). Visual width of fill+track == cellWidth.
+//
+// Special cases:
+//   - count == 0 (regardless of total): no fill, full-width dim track.
+//   - count > 0 but ratio rounds to zero cells: a single "▏" fill cell
+//     ("present but tiny" beats invisible).
+//
+// totalCalls == 0 is treated as no-data — same as count == 0.
+func proportionalBar(count, totalCalls, cellWidth int) (fill, track string) {
+	if cellWidth <= 0 {
+		return "", ""
+	}
+	if count <= 0 || totalCalls <= 0 {
+		return "", dimStyle.Render(strings.Repeat("░", cellWidth))
+	}
+	pos := float64(count) / float64(totalCalls) * float64(cellWidth)
+	fullCells := int(pos)
+	frac := pos - float64(fullCells)
+	var raw strings.Builder
+	if fullCells > 0 {
+		raw.WriteString(strings.Repeat("█", fullCells))
+	}
+	if frac > 1e-9 && fullCells < cellWidth {
+		idx := int(frac * float64(len(horizontalBlocks)))
+		if idx >= len(horizontalBlocks) {
+			idx = len(horizontalBlocks) - 1
+		}
+		raw.WriteRune(horizontalBlocks[idx])
+	}
+	// 1-cell floor: count > 0 but math produced an empty fill.
+	if raw.Len() == 0 {
+		raw.WriteRune('▏')
+	}
+	fillVisualW := 0
+	for range raw.String() {
+		fillVisualW++
+	}
+	if fillVisualW > cellWidth {
+		fillVisualW = cellWidth
+	}
+	fill = barFillStyle.Render(raw.String())
+	trackW := cellWidth - fillVisualW
+	if trackW > 0 {
+		track = dimStyle.Render(strings.Repeat("░", trackW))
+	}
+	return fill, track
+}
+
 // formatWithCommas formats an integer with comma thousands separators.
 func formatWithCommas(n int) string {
 	s := fmt.Sprintf("%d", n)

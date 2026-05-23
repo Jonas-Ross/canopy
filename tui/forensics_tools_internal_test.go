@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/jonasross/canopy/internal/ansi"
 )
 
 func TestCategorizeTool(t *testing.T) {
@@ -104,4 +107,65 @@ func TestFormatToolName(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProportionalBar_cellCounts(t *testing.T) {
+	const width = 20
+	tests := []struct {
+		name      string
+		count     int
+		total     int
+		wantFull  int // count of full block "█" cells
+		wantTrack int // count of dim track "░" cells
+		wantPart  bool
+	}{
+		{"zero count zero total", 0, 0, 0, width, false},
+		{"zero count non-zero total", 0, 1000, 0, width, false},
+		{"100 percent", 100, 100, width, 0, false},
+		{"50 percent exact", 50, 100, 10, 10, false},
+		{"47 percent partial", 47, 100, 9, 10, true},
+		{"5 percent exact one cell", 5, 100, 1, 19, false},
+		{"1 percent partial", 1, 100, 0, 19, true},
+		// 1-cell floor: count > 0 but ratio * width rounds to 0
+		{"tiny ratio floors to 1 cell", 1, 10_000, 0, 19, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fill, track := proportionalBar(tt.count, tt.total, width)
+			plainFill := ansi.Strip(fill)
+			plainTrack := ansi.Strip(track)
+			gotFull := strings.Count(plainFill, "█")
+			gotTrack := strings.Count(plainTrack, "░")
+			gotPart := false
+			for _, r := range plainFill {
+				if r != '█' {
+					gotPart = true
+					break
+				}
+			}
+			if gotFull != tt.wantFull {
+				t.Errorf("full cells = %d, want %d (fill=%q)", gotFull, tt.wantFull, plainFill)
+			}
+			if gotTrack != tt.wantTrack {
+				t.Errorf("track cells = %d, want %d (track=%q)", gotTrack, tt.wantTrack, plainTrack)
+			}
+			if gotPart != tt.wantPart {
+				t.Errorf("has partial = %v, want %v (fill=%q)", gotPart, tt.wantPart, plainFill)
+			}
+			// Total visual cells (fill + track) must always equal width.
+			total := runeCount(plainFill) + runeCount(plainTrack)
+			if total != width {
+				t.Errorf("total visual cells = %d, want %d (fill=%q track=%q)",
+					total, width, plainFill, plainTrack)
+			}
+		})
+	}
+}
+
+func runeCount(s string) int {
+	n := 0
+	for range s {
+		n++
+	}
+	return n
 }
