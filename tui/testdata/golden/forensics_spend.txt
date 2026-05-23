@@ -1,6 +1,6 @@
 ── Canopy ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ops · forensics ──
 
-  spend · sessions · tools · worktrees
+  tools · worktrees · spend · sessions
 
   spend · last 30 days  filter: all
   2026-05-18   ·

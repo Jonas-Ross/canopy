@@ -54,9 +54,9 @@ func populatedSnap() analytics.Snapshot {
 func TestForensicsSubTabNav(t *testing.T) {
 	m := buildForensicsModel(t, emptySnap(), 140, 30)
 
-	// Initial view is viewSpend (zero value).
-	if got := tui.ActiveView(m); got != tui.ViewSpend {
-		t.Fatalf("initial forensics view = %v, want ViewSpend", got)
+	// Initial view is viewTools (zero value).
+	if got := tui.ActiveView(m); got != tui.ViewTools {
+		t.Fatalf("initial forensics view = %v, want ViewTools", got)
 	}
 
 	// Digit keys jump directly.
@@ -64,10 +64,10 @@ func TestForensicsSubTabNav(t *testing.T) {
 		key  rune
 		want tui.View
 	}{
-		{'2', tui.ViewSessions},
-		{'3', tui.ViewTools},
-		{'4', tui.ViewWorktrees},
-		{'1', tui.ViewSpend},
+		{'2', tui.ViewWorktrees},
+		{'3', tui.ViewSpend},
+		{'4', tui.ViewSessions},
+		{'1', tui.ViewTools},
 	} {
 		m, _ = m.Update(sendKey(tc.key))
 		if got := tui.ActiveView(m); got != tc.want {
@@ -76,28 +76,28 @@ func TestForensicsSubTabNav(t *testing.T) {
 	}
 
 	// h/l cycle with wrap-around.
-	// Start at ViewSpend (1), h wraps to ViewWorktrees (4).
+	// Start at ViewTools (1), h wraps to ViewSessions (4).
 	m, _ = m.Update(sendKey('h'))
-	if got := tui.ActiveView(m); got != tui.ViewWorktrees {
-		t.Errorf("h from ViewSpend: view = %v, want ViewWorktrees (wrap-around)", got)
-	}
-	// l from ViewWorktrees (4) → ViewSpend (1).
-	m, _ = m.Update(sendKey('l'))
-	if got := tui.ActiveView(m); got != tui.ViewSpend {
-		t.Errorf("l from ViewWorktrees: view = %v, want ViewSpend (wrap-around)", got)
-	}
-	// l forward: ViewSpend → ViewSessions → ViewTools → ViewWorktrees.
-	m, _ = m.Update(sendKey('l'))
 	if got := tui.ActiveView(m); got != tui.ViewSessions {
-		t.Errorf("l from ViewSpend: view = %v, want ViewSessions", got)
+		t.Errorf("h from ViewTools: view = %v, want ViewSessions (wrap-around)", got)
 	}
+	// l from ViewSessions (4) → ViewTools (1).
 	m, _ = m.Update(sendKey('l'))
 	if got := tui.ActiveView(m); got != tui.ViewTools {
-		t.Errorf("l from ViewSessions: view = %v, want ViewTools", got)
+		t.Errorf("l from ViewSessions: view = %v, want ViewTools (wrap-around)", got)
 	}
+	// l forward: ViewTools → ViewWorktrees → ViewSpend → ViewSessions.
 	m, _ = m.Update(sendKey('l'))
 	if got := tui.ActiveView(m); got != tui.ViewWorktrees {
 		t.Errorf("l from ViewTools: view = %v, want ViewWorktrees", got)
+	}
+	m, _ = m.Update(sendKey('l'))
+	if got := tui.ActiveView(m); got != tui.ViewSpend {
+		t.Errorf("l from ViewWorktrees: view = %v, want ViewSpend", got)
+	}
+	m, _ = m.Update(sendKey('l'))
+	if got := tui.ActiveView(m); got != tui.ViewSessions {
+		t.Errorf("l from ViewSpend: view = %v, want ViewSessions", got)
 	}
 }
 
@@ -148,16 +148,16 @@ func TestForensicsTabBackToOps(t *testing.T) {
 // and back does not reset the selected sub-view).
 func TestForensicsSubTabNotPersistAcrossTabCycle(t *testing.T) {
 	m := buildForensicsModel(t, emptySnap(), 80, 30)
-	// Navigate to sessions view.
+	// Navigate away from the default tools view to worktrees.
 	m, _ = m.Update(sendKey('2'))
-	if got := tui.ActiveView(m); got != tui.ViewSessions {
-		t.Fatalf("pre-condition: view = %v, want ViewSessions", got)
+	if got := tui.ActiveView(m); got != tui.ViewWorktrees {
+		t.Fatalf("pre-condition: view = %v, want ViewWorktrees", got)
 	}
 	// Leave and return.
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // → ops
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // → forensics
-	if got := tui.ActiveView(m); got != tui.ViewSessions {
-		t.Errorf("sub-view after round-trip = %v, want ViewSessions (should persist)", got)
+	if got := tui.ActiveView(m); got != tui.ViewWorktrees {
+		t.Errorf("sub-view after round-trip = %v, want ViewWorktrees (should persist)", got)
 	}
 }
 
@@ -299,10 +299,10 @@ func TestForensicsEmptyState_golden(t *testing.T) {
 	assertGolden(t, "forensics_empty", frame(m))
 }
 
-// TestForensicsSubTabBar_golden pins the default (spend) sub-tab golden frame.
+// TestForensicsSubTabBar_golden pins the default (tools) sub-tab golden frame.
 // The visual highlight of other sub-tabs is tested via TestForensicsSubTabBar_activeHighlight.
 func TestForensicsSubTabBar_golden(t *testing.T) {
 	m := buildForensicsModel(t, emptySnap(), 140, 30)
 	m, _ = m.Update(sendKey('1'))
-	assertGolden(t, "forensics_subtab_spend", frame(m))
+	assertGolden(t, "forensics_subtab_tools", frame(m))
 }

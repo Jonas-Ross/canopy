@@ -1,6 +1,6 @@
 ── Canopy ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ops · forensics ──
 
-  spend · sessions · tools · worktrees
+  tools · worktrees · spend · sessions
 
   (no sessions yet)
 

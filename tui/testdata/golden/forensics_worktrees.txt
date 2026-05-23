@@ -1,6 +1,6 @@
 ── Canopy ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ops · forensics ──
 
-  spend · sessions · tools · worktrees
+  tools · worktrees · spend · sessions
 
   worktree                  sessions  total time  last seen
   feat+auth                        3      2h 27m  now

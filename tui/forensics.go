@@ -12,14 +12,15 @@ import (
 )
 
 // forensicsView is the sub-tab enum within the forensics top-level tab.
-// Zero value is viewSpend so an uninitialized Model starts on the spend view.
+// Zero value is viewTools so an uninitialized Model lands on the tools
+// view — the most-used sub-view in daily operation.
 type forensicsView int
 
 const (
-	viewSpend forensicsView = iota
-	viewSessions
-	viewTools
+	viewTools forensicsView = iota
 	viewWorktrees
+	viewSpend
+	viewSessions
 )
 
 const forensicsViewCount = 4
@@ -27,7 +28,7 @@ const forensicsViewCount = 4
 // label returns the clean display label for the sub-tab bar.
 // No digit prefixes — digits are documented in the footer, not painted here.
 func (v forensicsView) label() string {
-	return [...]string{"spend", "sessions", "tools", "worktrees"}[v]
+	return [...]string{"tools", "worktrees", "spend", "sessions"}[v]
 }
 
 // loadAnalyticsCmd returns a tea.Cmd that calls analytics.Build
@@ -61,16 +62,16 @@ func (m Model) updateForensicsMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
 		switch msg.Runes[0] {
 		case '1':
-			m.forensicsView = viewSpend
-			return m, nil
-		case '2':
-			m.forensicsView = viewSessions
-			return m, nil
-		case '3':
 			m.forensicsView = viewTools
 			return m, nil
-		case '4':
+		case '2':
 			m.forensicsView = viewWorktrees
+			return m, nil
+		case '3':
+			m.forensicsView = viewSpend
+			return m, nil
+		case '4':
+			m.forensicsView = viewSessions
 			return m, nil
 		case 'h':
 			m.forensicsView = (m.forensicsView + forensicsViewCount - 1) % forensicsViewCount
@@ -144,7 +145,7 @@ func (m Model) renderForensicsView() string {
 // "  spend · sessions · tools · worktrees" with the active label in
 // tabActive style and inactive labels in dimStyle. Separators use ruleStyle.
 func (m Model) renderForensicsSubTabBar(width int) string {
-	views := [forensicsViewCount]forensicsView{viewSpend, viewSessions, viewTools, viewWorktrees}
+	views := [forensicsViewCount]forensicsView{viewTools, viewWorktrees, viewSpend, viewSessions}
 	sep := " " + ruleStyle.Render("·") + " "
 
 	var parts []string

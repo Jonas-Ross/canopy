@@ -1,6 +1,6 @@
 ── Canopy ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ops · forensics ──
 
-  spend · sessions · tools · worktrees
+  tools · worktrees · spend · sessions
 
   Opus 4.7    7 sessions · 1,847 calls
     exec  Bash                  ████████▊                812   43%

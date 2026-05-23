@@ -1,6 +1,6 @@
 ── Canopy ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ops · forensics ──
 
-  spend · sessions · tools · worktrees
+  tools · worktrees · spend · sessions
 
     started   model           worktree            duration     prompts    tools
   ● 11:15     opus-4-7        feat+auth           45m               12       47

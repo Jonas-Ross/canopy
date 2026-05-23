@@ -365,13 +365,13 @@ func buildAnalyticsModel(t *testing.T, view tui.View, snap analytics.Snapshot) t
 	m, _ = m.Update(tui.AnalyticsLoadedMsg{Snapshot: snap})
 	// Navigate to the requested sub-view via digit keys.
 	switch view {
-	case tui.ViewSpend:
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	case tui.ViewSessions:
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	case tui.ViewTools:
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	case tui.ViewWorktrees:
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	case tui.ViewSpend:
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	case tui.ViewSessions:
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	}
 	return m

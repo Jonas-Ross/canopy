@@ -21,10 +21,10 @@ func TestForensicsSubTabBar_activeHighlight(t *testing.T) {
 		wantActive   string // label that should be wrapped in tabActive
 		wantInactive []string // labels that should NOT be wrapped in tabActive
 	}{
-		{'1', "spend", []string{"sessions", "tools", "worktrees"}},
-		{'2', "sessions", []string{"spend", "tools", "worktrees"}},
-		{'3', "tools", []string{"spend", "sessions", "worktrees"}},
-		{'4', "worktrees", []string{"spend", "sessions", "tools"}},
+		{'1', "tools", []string{"worktrees", "spend", "sessions"}},
+		{'2', "worktrees", []string{"tools", "spend", "sessions"}},
+		{'3', "spend", []string{"tools", "worktrees", "sessions"}},
+		{'4', "sessions", []string{"tools", "worktrees", "spend"}},
 	} {
 		m := buildForensicsModel(t, emptySnap(), 140, 30)
 		tm, _ := m.Update(sendKey(tc.key))
