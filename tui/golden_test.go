@@ -82,9 +82,9 @@ func TestGolden_BlinkOnPhase(t *testing.T) {
 	m = tui.SetBlinkPhaseForTest(m, true)
 	assertGolden(t, "blink_on", frame(m))
 
-	// Color-regression guard: pulse-as-block (Background(colGreen) on a
-	// green glyph) must not return. Background SGR codes for green
-	// (42 / 102) must not appear.
+	// Color-regression guard: live-as-block (Background(colGreen) on a
+	// green glyph rendering as a solid block) must not return. Background
+	// SGR codes for green (42 / 102) must not appear.
 	raw := rawFrame(m)
 	if strings.Contains(raw, "\x1b[42m") || strings.Contains(raw, "\x1b[102m") {
 		t.Errorf("on-phase raw frame contains background-green SGR (regression: live-as-block):\n%q", raw)

@@ -128,6 +128,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !existed {
 			m.ordered = append(m.ordered, u.Worktree)
 		}
+		// Snapshot the no-Live → some-Live transition before mutating the
+		// state map, so a fresh arrival can reset blinkPhase even when a
+		// stale tick is still in flight (blinkRunning=true) from a previous
+		// Live that has since dropped.
+		prevAnyLive := m.anyLive()
 		m.states[u.Worktree] = u.State
 		if m.repo == "" && u.State.Repo.Name != "" {
 			m.repo = u.State.Repo.Name
@@ -135,14 +140,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.repoRoot == "" && u.State.Repo.Root != "" {
 			m.repoRoot = u.State.Repo.Root
 		}
-		// Kick the blink tick the first time we observe any Live worktree.
-		// blinkRunning gates against double-starting if a second Live arrives
-		// while the tick is still in flight. Start on the bright phase so the
-		// glyph doesn't render dim before the first tick fires.
-		if u.State.Live != nil && !m.blinkRunning {
-			m.blinkRunning = true
+		// Reset blinkPhase to bright whenever a worktree transitions the
+		// model from "no Live anywhere" to "some Live" — guarantees the
+		// first paint of a freshly-arrived Live row is on-phase regardless
+		// of where the in-flight tick chain is. Kick the tick when no chain
+		// is running yet; otherwise the existing chain picks up the new
+		// worktree on its next fire.
+		if u.State.Live != nil && !prevAnyLive {
 			m.blinkPhase = true
-			return m, tea.Tick(blinkInterval, func(time.Time) tea.Msg { return blinkTickMsg{} })
+			if !m.blinkRunning {
+				m.blinkRunning = true
+				return m, tea.Tick(blinkInterval, func(time.Time) tea.Msg { return blinkTickMsg{} })
+			}
 		}
 		return m, nil
 
@@ -660,7 +669,8 @@ func FilterValue(m tea.Model) string {
 }
 
 // SetNow replaces a Model's clock function. Test-only — used by the golden
-// frame harness to freeze time so pulse/notice rendering is deterministic.
+// frame harness to freeze time so relative-time and notice rendering is
+// deterministic.
 func SetNow(m tea.Model, fn func() time.Time) tea.Model {
 	if mm, ok := m.(Model); ok {
 		mm.now = fn

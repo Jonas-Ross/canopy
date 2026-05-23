@@ -25,7 +25,7 @@ rendering is opt-in for visual review.
    canopy demo --script=tui/testdata/scripts/<scenario>.txt
    ```
    The script's `capture` directives write text frames to the paths it names. Read the files.
-4. **For visual-style questions** (was this rendered with the right colour? does the pulse glyph actually appear or is it a solid block?), add a `capture-png` directive and point it at a `.png`:
+4. **For visual-style questions** (was this rendered with the right colour? does the live-indicator blink glyph actually appear or is it a solid block?), add a `capture-png` directive and point it at a `.png`:
    ```
    capture-png /tmp/check.png
    ```

@@ -267,6 +267,43 @@ func TestBlinkTick_RestartsAfterIdle(t *testing.T) {
 	}
 }
 
+// TestBlinkTick_FreshLiveAfterDropResetsToBright covers the rapid drop+rearm
+// case: while the tick chain is still rolling (blinkRunning=true), a previous
+// tick may have already toggled blinkPhase to false. If the only Live then
+// drops and a new Live arrives before the next tick fires, that new Live's
+// first paint must be bright — the design invariant "the glyph doesn't render
+// dim before the first tick fires" must hold for every arrival, not just
+// cold-start ones.
+func TestBlinkTick_FreshLiveAfterDropResetsToBright(t *testing.T) {
+	clk := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	m := tui.NewModel(&fakeRefresher{})
+	m = tui.SetNow(m, func() time.Time { return clk })
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	m, _ = armLive(t, m, "/repo/wt-a", "feat/a")
+	// Fire one tick to drive blinkPhase to false (mid-cycle).
+	m, _ = m.Update(tui.MakeBlinkTickMsg())
+	if tui.BlinkPhaseOf(m) {
+		t.Fatalf("pre-condition: blinkPhase = true after one tick, want false")
+	}
+
+	// Drop wt-a's Live but keep blinkRunning=true (in-flight tick).
+	m, _ = m.Update(tui.UpdateMsg(aggregator.Update{
+		Worktree: "/repo/wt-a",
+		State:    aggregator.WorktreeState{Worktree: newBaseWorktree("/repo/wt-a", "feat/a")},
+	}))
+	if !tui.BlinkRunningOf(m) {
+		t.Fatalf("pre-condition: blinkRunning must remain true while a tick is still pending")
+	}
+
+	// New Live arrives. Its first paint must be bright.
+	m, _ = armLive(t, m, "/repo/wt-b", "feat/b")
+
+	if !tui.BlinkPhaseOf(m) {
+		t.Errorf("blinkPhase = false on freshly-arrived Live worktree, want true (first paint must be bright per design invariant)")
+	}
+}
+
 func TestDetailPane_SubagentSessionsFiltered(t *testing.T) {
 	// Two sessions on the focused worktree: one top-level and one sidechain.
 	// The detail pane should only render the top-level one in the Sessions
