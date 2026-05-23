@@ -151,15 +151,25 @@ func (m Model) renderForensicsSubTabBar(width int) string {
 }
 
 // renderForensicsBody renders the body area. When the snapshot has no
-// sessions the empty-state placeholder is returned. Otherwise a stub
-// for the active view is returned (Tasks 11-14 replace the stub with real
-// renderers per view).
+// sessions the empty-state placeholder is returned. Otherwise dispatches
+// to the renderer for the active sub-view.
 func (m Model) renderForensicsBody(width int) string {
-	_ = width
 	if len(m.analytics.Sessions) == 0 {
 		return dimStyle.Render("  (no sessions yet)")
 	}
-	return dimStyle.Render("  (" + m.forensicsView.label() + " view)")
+	now := m.now()
+	switch m.forensicsView {
+	case viewSpend:
+		return renderSpendView(m.analytics.Days, m.analytics.WindowStart, m.analytics.WindowEnd, width)
+	case viewSessions:
+		return renderSessionsView(m.analytics.Sessions, now, width)
+	case viewTools:
+		return renderToolsView(m.analytics.Tools, m.analytics.Sessions, width)
+	case viewWorktrees:
+		return renderWorktreesView(m.analytics.Worktrees, now, width)
+	default:
+		return dimStyle.Render("  (" + m.forensicsView.label() + " view)")
+	}
 }
 
 func (m Model) renderForensicsFooter(width int) string {

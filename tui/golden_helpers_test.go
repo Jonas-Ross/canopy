@@ -13,6 +13,7 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/jonasross/canopy/aggregator"
+	"github.com/jonasross/canopy/analytics"
 	"github.com/jonasross/canopy/git"
 	"github.com/jonasross/canopy/internal/ansi"
 	"github.com/jonasross/canopy/pr"
@@ -215,4 +216,151 @@ func normalizeGolden(s string) string {
 		lines[i] = strings.TrimRight(l, " \t")
 	}
 	return strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
+}
+
+// scenarioAnalytics returns a deterministic, realistic analytics.Snapshot
+// for golden-frame tests. All timestamps are relative to goldenClock
+// (2026-05-18 12:00 UTC). The data is designed to exercise every renderer:
+// sparkline peak, zero-activity days, live-dot sessions, tool "other"
+// collapse, and per-worktree totals.
+func scenarioAnalytics() analytics.Snapshot {
+	now := goldenClock // 2026-05-18 12:00 UTC
+
+	// Helper: UTC midnight N days before now.
+	day := func(daysAgo int) time.Time {
+		return now.Add(-time.Duration(daysAgo) * 24 * time.Hour).Truncate(24 * time.Hour)
+	}
+
+	// Days: 10 days with activity, descending. day-1 is the peak. Days 4 and 7
+	// have zero activity (rendered as "·" placeholder). Snapshot.Days is sorted
+	// DESC so index 0 = most recent.
+	days := []analytics.DayBucket{
+		{Date: day(1), Tokens: sessions.TokenStats{Input: 4_200_000, Output: 1_100_000, CacheRead: 8_100_000, CacheCreation: 1_200_000}, SessionCount: 6},
+		{Date: day(2), Tokens: sessions.TokenStats{Input: 1_800_000, Output: 480_000, CacheRead: 3_200_000, CacheCreation: 400_000}, SessionCount: 3},
+		{Date: day(3), Tokens: sessions.TokenStats{Input: 2_600_000, Output: 640_000, CacheRead: 5_100_000, CacheCreation: 700_000}, SessionCount: 4},
+		// day 4 intentionally absent — zero-activity day
+		{Date: day(5), Tokens: sessions.TokenStats{Input: 900_000, Output: 220_000, CacheRead: 1_500_000, CacheCreation: 200_000}, SessionCount: 2},
+		{Date: day(6), Tokens: sessions.TokenStats{Input: 1_200_000, Output: 310_000, CacheRead: 2_400_000, CacheCreation: 300_000}, SessionCount: 2},
+		// day 7 intentionally absent — zero-activity day
+		{Date: day(8), Tokens: sessions.TokenStats{Input: 600_000, Output: 150_000, CacheRead: 900_000, CacheCreation: 100_000}, SessionCount: 1},
+		{Date: day(9), Tokens: sessions.TokenStats{Input: 750_000, Output: 190_000, CacheRead: 1_100_000, CacheCreation: 150_000}, SessionCount: 1},
+		{Date: day(10), Tokens: sessions.TokenStats{Input: 300_000, Output: 80_000, CacheRead: 400_000, CacheCreation: 50_000}, SessionCount: 1},
+		{Date: day(15), Tokens: sessions.TokenStats{Input: 400_000, Output: 100_000, CacheRead: 600_000, CacheCreation: 80_000}, SessionCount: 1},
+		{Date: day(22), Tokens: sessions.TokenStats{Input: 200_000, Output: 50_000, CacheRead: 300_000, CacheCreation: 40_000}, SessionCount: 1},
+	}
+
+	// Sessions: 8 rows sorted DESC by UpdatedAt.
+	// Two within the 120s live window (updated < 2 min ago).
+	sessions8 := []analytics.SessionSummary{
+		// Live: updated 30s ago
+		{
+			ID: "aaaa-0001", Model: "claude-opus-4-7",
+			Worktree:  "/repo/.worktrees/feat+auth",
+			StartedAt: now.Add(-45 * time.Minute), UpdatedAt: now.Add(-30 * time.Second),
+			Duration: 45 * time.Minute, Prompts: 12, ToolCalls: 47,
+		},
+		// Live: updated 90s ago
+		{
+			ID: "aaaa-0002", Model: "claude-sonnet-4-6",
+			Worktree:  "/repo",
+			StartedAt: now.Add(-20 * time.Minute), UpdatedAt: now.Add(-90 * time.Second),
+			Duration: 20 * time.Minute, Prompts: 8, ToolCalls: 22,
+		},
+		// Recent today
+		{
+			ID: "aaaa-0003", Model: "claude-opus-4-7",
+			Worktree:  "/repo/.worktrees/chore+deps",
+			StartedAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour),
+			Duration: 1 * time.Hour, Prompts: 18, ToolCalls: 63,
+		},
+		{
+			ID: "aaaa-0004", Model: "claude-sonnet-4-6",
+			Worktree:  "/repo/.worktrees/feat+auth",
+			StartedAt: now.Add(-5 * time.Hour), UpdatedAt: now.Add(-4 * time.Hour),
+			Duration: 47 * time.Minute, Prompts: 9, ToolCalls: 31,
+		},
+		// Yesterday
+		{
+			ID: "aaaa-0005", Model: "claude-opus-4-7",
+			Worktree:  "/repo",
+			StartedAt: now.Add(-26 * time.Hour), UpdatedAt: now.Add(-25 * time.Hour),
+			Duration: 1*time.Hour + 12*time.Minute, Prompts: 21, ToolCalls: 78,
+		},
+		{
+			ID: "aaaa-0006", Model: "claude-sonnet-4-6",
+			Worktree:  "/repo/.worktrees/chore+deps",
+			StartedAt: now.Add(-28 * time.Hour), UpdatedAt: now.Add(-27 * time.Hour),
+			Duration: 38 * time.Minute, Prompts: 7, ToolCalls: 19,
+		},
+		{
+			ID: "aaaa-0007", Model: "claude-opus-4-7",
+			Worktree:  "/repo/.worktrees/feat+auth",
+			StartedAt: now.Add(-50 * time.Hour), UpdatedAt: now.Add(-49 * time.Hour),
+			Duration: 55 * time.Minute, Prompts: 14, ToolCalls: 52,
+		},
+		{
+			ID: "aaaa-0008", Model: "claude-sonnet-4-6",
+			Worktree:  "/repo",
+			StartedAt: now.Add(-75 * time.Hour), UpdatedAt: now.Add(-74 * time.Hour),
+			Duration: 28 * time.Minute, Prompts: 5, ToolCalls: 14,
+		},
+	}
+
+	// Tools: sorted (Model asc, Count desc). opus has 6 tools (tests "other"
+	// collapse); sonnet has 3.
+	tools := []analytics.ToolUsage{
+		{Model: "claude-opus-4-7", Tool: "Bash", Count: 812},
+		{Model: "claude-opus-4-7", Tool: "Read", Count: 487},
+		{Model: "claude-opus-4-7", Tool: "Edit", Count: 295},
+		{Model: "claude-opus-4-7", Tool: "Grep", Count: 153},
+		{Model: "claude-opus-4-7", Tool: "Write", Count: 75},
+		{Model: "claude-opus-4-7", Tool: "Glob", Count: 25},
+		{Model: "claude-sonnet-4-6", Tool: "Bash", Count: 189},
+		{Model: "claude-sonnet-4-6", Tool: "Read", Count: 97},
+		{Model: "claude-sonnet-4-6", Tool: "Edit", Count: 86},
+	}
+
+	// Worktrees: 4 rows sorted DESC by TotalTime.
+	worktrees := []analytics.WorktreeSummary{
+		{Path: "/repo/.worktrees/feat+auth", SessionCount: 3, TotalTime: 2*time.Hour + 27*time.Minute, LastSeen: now.Add(-30 * time.Second)},
+		{Path: "/repo", SessionCount: 3, TotalTime: 2*time.Hour + 0*time.Minute, LastSeen: now.Add(-90 * time.Second)},
+		{Path: "/repo/.worktrees/chore+deps", SessionCount: 2, TotalTime: 1*time.Hour + 38*time.Minute, LastSeen: now.Add(-27 * time.Hour)},
+		{Path: "/repo/.worktrees/fix+login", SessionCount: 0, TotalTime: 0, LastSeen: now.Add(-72 * time.Hour)},
+	}
+
+	return analytics.Snapshot{
+		GeneratedAt: now,
+		WindowStart: now.Add(-30 * 24 * time.Hour),
+		WindowEnd:   now,
+		Days:        days,
+		Sessions:    sessions8,
+		Tools:       tools,
+		Worktrees:   worktrees,
+	}
+}
+
+// buildAnalyticsModel constructs a Model on the forensics tab with the given
+// sub-view active and the snapshot injected. Sized to (width=140, height=40),
+// frozen clock.
+func buildAnalyticsModel(t *testing.T, view tui.View, snap analytics.Snapshot) tea.Model {
+	t.Helper()
+	m := tui.NewModel(&fakeRefresher{})
+	m = tui.SetNow(m, frozenNow())
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	// Switch to forensics tab.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	// Inject analytics snapshot.
+	m, _ = m.Update(tui.AnalyticsLoadedMsg{Snapshot: snap})
+	// Navigate to the requested sub-view via digit keys.
+	switch view {
+	case tui.ViewSpend:
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	case tui.ViewSessions:
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	case tui.ViewTools:
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	case tui.ViewWorktrees:
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	}
+	return m
 }

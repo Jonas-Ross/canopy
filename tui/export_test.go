@@ -109,6 +109,8 @@ func OrderedPaths(m tea.Model) []string {
 
 func ElidePath(path string, max int) string { return elidePath(path, max) }
 func Truncate(s string, max int) string     { return truncate(s, max) }
+func FormatTokens(n int) string             { return formatTokens(n) }
+func FormatSessionTime(t, now time.Time) string { return formatSessionTime(t, now) }
 
 // CreateWorktreeCmdForTest exposes createWorktreeCmd so tests can drive
 // the branch-name validation and soft-gate paths.
