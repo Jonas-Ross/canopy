@@ -1,0 +1,38 @@
+── Canopy ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ops · forensics ──
+
+  tools · worktrees · spend · sessions
+
+  Opus 4.7    7 sessions · 1,847 calls
+    exec  Bash                  ████████▊                812   43%
+    file  Read                  █████▎                   487   26%
+    file  Edit                  ███▎                     295   15%
+    file  Grep                  █▋                       153    8%
+    file  Write                 ▊                         75    4%
+    ·     other                 ▎                         25    1%
+
+  Sonnet 4.6    5 sessions · 372 calls
+    exec  Bash                  ██████████▎              189   50%
+    file  Read                  █████▎                    97   26%
+    file  Edit                  ████▋                     86   23%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  [tab] back to ops  ·  [1-4] view  ·  [h/l] prev/next  ·  [r] refresh  ·  [q] quit ───────────────────────────────────────────────────────

@@ -12,12 +12,26 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonasross/canopy/aggregator"
+	"github.com/jonasross/canopy/analytics"
+	"github.com/jonasross/canopy/sessions"
 )
 
-// Refresher triggers a data refresh. Production passes *aggregator.Aggregator;
-// tests inject a fake.
+// Refresher triggers a data refresh and exposes the session store for
+// analytical queries. Production passes *aggregator.Aggregator; tests
+// inject a fake.
 type Refresher interface {
 	Refresh()
+	SessionStore() *sessions.Store
+}
+
+// AnalyticsLoadedMsg carries the result of an async analytics.Build call.
+// Dispatched when the forensics tab loads or when r is pressed on that
+// tab. Exactly one of Snapshot or Err is meaningful per message — on
+// failure the Update handler surfaces Err as a notice and flips
+// analyticsLoaded so the user moves out of the "loading…" placeholder.
+type AnalyticsLoadedMsg struct {
+	Snapshot analytics.Snapshot
+	Err      error
 }
 
 // UpdateMsg wraps an aggregator.Update for delivery via tea.Program.Send.
@@ -29,9 +43,20 @@ type UpdateMsg aggregator.Update
 // breathing rhythm; faster feels restless, slower feels sluggish.
 const blinkInterval = 1 * time.Second
 
+// tab is the top-level tab enum. tabOperational is the zero value so an
+// uninitialized Model defaults to the operational view.
+type tab int
+
+const (
+	tabOperational tab = iota
+	tabForensics
+)
+
 // Model is the root bubbletea model. Update is pure: I/O lives in Run.
 type Model struct {
 	refresher Refresher
+
+	tab tab
 
 	// runCtx is the bubbletea-level lifecycle ctx, threaded through to the
 	// op cmd factories (e.g. removeWorktreeCmd) so that quit-mid-operation
@@ -73,6 +98,20 @@ type Model struct {
 	blinkRunning bool
 
 	procsExpanded map[string]bool
+
+	// forensicsView is the active sub-tab within the forensics tab.
+	// Zero value is viewSpend. Persists across tab round-trips so the user
+	// returns to the same sub-view after switching back from ops.
+	forensicsView forensicsView
+
+	// analytics holds the most recently built analytics snapshot. Populated
+	// asynchronously via loadAnalyticsCmd when the forensics tab is entered
+	// or when r is pressed on that tab. analyticsErr persists across keypresses
+	// so a failed first load is distinguishable from a genuine empty store —
+	// cleared on the next successful load or when the user triggers a retry.
+	analytics       analytics.Snapshot
+	analyticsLoaded bool
+	analyticsErr    error
 
 	now func() time.Time
 }
@@ -218,6 +257,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, refreshCmd(m.refresher)
 
+	case AnalyticsLoadedMsg:
+		// Error path: surface as a transient notice AND persist on
+		// analyticsErr so the forensics body can render a sticky error
+		// state after the next keypress clears the notice. Keep any prior
+		// snapshot visible — retry via r.
+		if msg.Err != nil {
+			m.notice = errorStyle.Render("analytics: " + msg.Err.Error())
+			m.analyticsErr = msg.Err
+			m.analyticsLoaded = true
+			return m, nil
+		}
+		if !msg.Snapshot.GeneratedAt.IsZero() {
+			m.analytics = msg.Snapshot
+			m.analyticsLoaded = true
+			m.analyticsErr = nil
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -250,6 +307,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Route forensics-tab keys to the dedicated handler so digit/h/l
+	// bindings never interfere with the operational tab.
+	if m.tab == tabForensics {
+		return m.updateForensicsMode(msg)
+	}
+
 	switch {
 	case msg.Type == tea.KeyCtrlC:
 		return m, tea.Quit
@@ -272,8 +335,6 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeFiltering
 			m.filterInput.SetValue(m.filterStr)
 			m.filterInput.Focus()
-		case keyForensics:
-			m.notice = dimStyle.Render(footerForensics)
 		case keyNew:
 			out, cmd := m.startNewWorktree()
 			return out, cmd
@@ -297,7 +358,10 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.moveFocus(-1)
 
 	case msg.Type == tea.KeyTab:
-		m.notice = dimStyle.Render(footerTab)
+		// Only reached when m.tab == tabOperational — forensics Tab is
+		// handled by updateForensicsMode before reaching this switch.
+		m.tab = tabForensics
+		return m, loadAnalyticsCmd(m.refresher, m.now())
 
 	case msg.Type == tea.KeyEsc:
 		m.filterStr = ""
@@ -493,6 +557,15 @@ func wrappedRows(s string, width int) int {
 }
 
 func (m Model) View() string {
+	switch m.tab {
+	case tabForensics:
+		return m.renderForensicsView()
+	default:
+		return m.renderOperationalView()
+	}
+}
+
+func (m Model) renderOperationalView() string {
 	now := m.now()
 	width := m.width
 	if width <= 0 {
@@ -556,7 +629,15 @@ func (m Model) renderTitleBar(width int) string {
 	if m.repo != "" {
 		left += " " + ruleStyle.Render("·") + " " + repoStyle.Render(m.repo)
 	}
-	right := tabActive.Render("ops") + " " + tabFaded.Render("·") + " " + tabFaded.Render("forensics") + " "
+
+	opsStyle := tabFaded
+	forensicsStyle := tabFaded
+	if m.tab == tabForensics {
+		forensicsStyle = tabActive
+	} else {
+		opsStyle = tabActive
+	}
+	right := opsStyle.Render("ops") + " " + tabFaded.Render("·") + " " + forensicsStyle.Render("forensics") + " "
 
 	leftW := lipgloss.Width(left)
 	rightW := lipgloss.Width(right)
@@ -674,6 +755,17 @@ func FilterValue(m tea.Model) string {
 func SetNow(m tea.Model, fn func() time.Time) tea.Model {
 	if mm, ok := m.(Model); ok {
 		mm.now = fn
+		return mm
+	}
+	return m
+}
+
+// SetNotice replaces a Model's transient notice string. Test-only seam
+// for verifying that footers (ops and forensics) render m.notice
+// without having to thread the actual async-op cmd flow.
+func SetNotice(m tea.Model, notice string) tea.Model {
+	if mm, ok := m.(Model); ok {
+		mm.notice = notice
 		return mm
 	}
 	return m

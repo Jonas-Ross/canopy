@@ -43,3 +43,4 @@ func assertFrameHasChrome(t *testing.T, label, frame string) {
 		t.Fatalf("%s frame missing 'Canopy' title bar:\n%s", label, frame)
 	}
 }
+

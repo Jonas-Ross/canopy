@@ -2,8 +2,11 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/jonasross/canopy/analytics"
 )
 
 // Test-only seams. Each function here exposes an unexported symbol so
@@ -106,6 +109,8 @@ func OrderedPaths(m tea.Model) []string {
 
 func ElidePath(path string, max int) string { return elidePath(path, max) }
 func Truncate(s string, max int) string     { return truncate(s, max) }
+func FormatTokens(n int) string             { return formatTokens(n) }
+func FormatSessionTime(t, now time.Time) string { return formatSessionTime(t, now) }
 
 // CreateWorktreeCmdForTest exposes createWorktreeCmd so tests can drive
 // the branch-name validation and soft-gate paths.
@@ -153,6 +158,48 @@ func NewFormBaseValueOf(m tea.Model) string {
 	return ""
 }
 
+// ForensicsView seams — expose the unexported forensicsView type and constants
+// so forensics_test.go can drive and assert the active sub-view.
+
+// View is the exported alias for the unexported forensicsView type.
+type View = forensicsView
+
+const (
+	ViewSpend     = viewSpend
+	ViewSessions  = viewSessions
+	ViewTools     = viewTools
+	ViewWorktrees = viewWorktrees
+)
+
+// ActiveView returns the active forensics sub-view of a Model.
+// Returns ViewSpend on a type-assertion miss.
+func ActiveView(m tea.Model) View {
+	if mm, ok := m.(Model); ok {
+		return mm.forensicsView
+	}
+	return ViewSpend
+}
+
+// Tab seams — expose the unexported tab type and constants so tui_test can
+// drive and assert the active tab without reaching into unexported fields.
+
+// Tab is the exported alias for the unexported tab type.
+type Tab = tab
+
+const (
+	TabOperational = tabOperational
+	TabForensics   = tabForensics
+)
+
+// ActiveTab returns the active tab of a Model. Returns TabOperational on a
+// type-assertion miss.
+func ActiveTab(m tea.Model) Tab {
+	if mm, ok := m.(Model); ok {
+		return mm.tab
+	}
+	return TabOperational
+}
+
 // BlinkPhaseOf returns the current phase of the live-indicator blink:
 // true = on (bright), false = off (dim). Returns false on a type-assertion
 // miss.
@@ -181,4 +228,29 @@ func SetBlinkPhaseForTest(m tea.Model, phase bool) tea.Model {
 		return mm
 	}
 	return m
+}
+
+// Analytics seams — expose snapshot loading state for test assertions.
+
+// AnalyticsLoaded reports whether the Model has received a successful
+// AnalyticsLoadedMsg. Returns false on a type-assertion miss.
+func AnalyticsLoaded(m tea.Model) bool {
+	if mm, ok := m.(Model); ok {
+		return mm.analyticsLoaded
+	}
+	return false
+}
+
+// AnalyticsSnapshot returns the analytics.Snapshot currently stored on the
+// Model. Returns a zero-value Snapshot on a type-assertion miss.
+func AnalyticsSnapshot(m tea.Model) analytics.Snapshot {
+	if mm, ok := m.(Model); ok {
+		return mm.analytics
+	}
+	return analytics.Snapshot{}
+}
+
+// LoadAnalyticsCmdForTest exposes loadAnalyticsCmd for direct testing.
+func LoadAnalyticsCmdForTest(r Refresher, now func() time.Time) tea.Cmd {
+	return loadAnalyticsCmd(r, now())
 }

@@ -72,6 +72,19 @@ var (
 	keyDescStyle = lipgloss.NewStyle().Foreground(colDim)
 	dimStyle     = lipgloss.NewStyle().Foreground(colDim)
 
+	// Forensics tools view: per-category type-tag styles. Each renders
+	// the 4-char lowercase tag (e.g. "file", "exec") AND is reused as
+	// the proportional-bar fill color, so a row's tag and bar share a
+	// hue — strong categorical signal without colorizing the name/count
+	// columns. Non-bold deliberately: bold on block characters (█)
+	// renders as a solid block on some terminals (see liveDimStyle).
+	toolTagFileStyle = lipgloss.NewStyle().Foreground(colBlue)
+	toolTagExecStyle = lipgloss.NewStyle().Foreground(colYellow)
+	toolTagWebStyle  = lipgloss.NewStyle().Foreground(colMagenta)
+	toolTagMCPStyle  = lipgloss.NewStyle().Foreground(colGreen)
+	toolTagTaskStyle = lipgloss.NewStyle().Foreground(colCyan)
+	toolTagDimStyle  = dimStyle // alias for the "·" / "other" tag
+
 	// primaryMarkerStyle has to read at a glance on dark terminals — cyan
 	// matches the repo-identity accent in the title bar, and bold compensates
 	// for the small ⌂ glyph that otherwise vanishes against a low-contrast bg.

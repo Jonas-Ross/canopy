@@ -1129,3 +1129,16 @@ func TestSnapshot_ParallelizesWorktreeStatus(t *testing.T) {
 			nWorktrees, elapsed, time.Duration(nWorktrees)*statusDelay, ceiling)
 	}
 }
+
+func TestSessionStore_returnsConfiguredStore(t *testing.T) {
+	store := openTestSessionStore(t, func(string) {})
+	repoRoot := t.TempDir()
+	a := newTestAggregator(t, Config{
+		Repos:        []Repo{{Root: repoRoot}},
+		SessionStore: store,
+	})
+
+	if got := a.SessionStore(); got != store {
+		t.Errorf("SessionStore() returned %p, want %p", got, store)
+	}
+}

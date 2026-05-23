@@ -35,4 +35,4 @@
                                                                               │  ● claude-opus-4-7  now
                                                                               │
 
-  j/k nav  ·  ⏎ shell  ·  n new  ·  d prune  ·  p PR  ·  P procs  ·  K kill  ·  r refresh  ·  / filter  ·  q quit ─────────────────────────
+  j/k nav  ·  ⏎ shell  ·  n new  ·  d prune  ·  p PR  ·  P procs  ·  K kill  ·  r refresh  ·  / filter  ·  tab forensics  ·  q quit ───────
