@@ -18,7 +18,7 @@ const topToolsPerModel = 5 // show top N tools before "other"
 // sessionCountByModel must reflect the FULL analytics window — passing
 // the length-capped Snapshot.Sessions here would undercount models
 // whose session counts exceed recentSessionsLimit.
-func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string]int, width int) string {
+func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string]int) string {
 	if len(tools) == 0 {
 		return dimStyle.Render("  no tool data")
 	}
@@ -89,9 +89,6 @@ func renderToolRow(name string, count, totalCalls int) string {
 		barW     = 20
 	)
 	tag, tagStyle := categorizeTool(name)
-	if name == "other" {
-		tag, tagStyle = "·", toolTagDimStyle
-	}
 	display := formatToolName(name, nameColW)
 	fill, track := proportionalBar(count, totalCalls, barW)
 	pct := 0

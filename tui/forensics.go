@@ -188,7 +188,7 @@ func (m Model) renderForensicsBody(width int) string {
 	case viewSessions:
 		return renderSessionsView(m.analytics.Sessions, now, width)
 	case viewTools:
-		return renderToolsView(m.analytics.Tools, m.analytics.SessionCountByModel, width)
+		return renderToolsView(m.analytics.Tools, m.analytics.SessionCountByModel)
 	case viewWorktrees:
 		return renderWorktreesView(m.analytics.Worktrees, now, width)
 	default:
