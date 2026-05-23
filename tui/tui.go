@@ -743,3 +743,14 @@ func SetNow(m tea.Model, fn func() time.Time) tea.Model {
 	}
 	return m
 }
+
+// SetNotice replaces a Model's transient notice string. Test-only seam
+// for verifying that footers (ops and forensics) render m.notice
+// without having to thread the actual async-op cmd flow.
+func SetNotice(m tea.Model, notice string) tea.Model {
+	if mm, ok := m.(Model); ok {
+		mm.notice = notice
+		return mm
+	}
+	return m
+}

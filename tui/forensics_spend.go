@@ -194,7 +194,10 @@ func renderSpendView(days []analytics.DayBucket, windowStart, windowEnd time.Tim
 	grandTotal := totIn + totOut + totCR + totCC
 	sb.WriteString("  ")
 	sb.WriteString(dimStyle.Render(fmt.Sprintf("%-10s", "total")))
-	sb.WriteString(strings.Repeat(" ", barCol+2))
+	// Active rows lay out as: date(10) + gap(3) + bar(sparkWidth) + post-bar gap(2).
+	// barCol == sparkWidth + 2 covers (bar + post-bar gap), so the leading
+	// gap of 3 spaces is what we need to mirror after the "total" label.
+	sb.WriteString(strings.Repeat(" ", barCol+3))
 	sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", numColW, fmt.Sprintf("in %s", formatTokens(totIn)))))
 	sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", numColW, fmt.Sprintf("out %s", formatTokens(totOut)))))
 	sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", cacheColW, fmt.Sprintf("cache-r %s", formatTokens(totCR)))))

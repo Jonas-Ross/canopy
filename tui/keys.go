@@ -28,6 +28,7 @@ var footerKeys = []struct{ key, desc string }{
 	{"K", "kill"},
 	{"r", "refresh"},
 	{"/", "filter"},
+	{"tab", "forensics"},
 	{"q", "quit"},
 }
 

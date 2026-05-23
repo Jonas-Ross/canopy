@@ -25,8 +25,13 @@ func buildForensicsModel(t *testing.T, snap analytics.Snapshot, width, height in
 	return m
 }
 
-// emptySnap returns a zero-value analytics.Snapshot with no sessions.
-func emptySnap() analytics.Snapshot { return analytics.Snapshot{} }
+// emptySnap returns a Snapshot representing a successful load of a
+// genuinely empty store: GeneratedAt is set so the Update handler
+// flips analyticsLoaded=true (distinct from "not yet loaded"), but
+// none of the four data fields carry rows.
+func emptySnap() analytics.Snapshot {
+	return analytics.Snapshot{GeneratedAt: goldenClock}
+}
 
 // populatedSnap returns a Snapshot with a non-empty Sessions slice so
 // the body renders the stub rather than the empty-state placeholder.
@@ -199,6 +204,36 @@ func TestForensicsNonEmptyState(t *testing.T) {
 	view := stripANSI(m.View())
 	if strings.Contains(view, "no sessions yet") {
 		t.Errorf("non-empty forensics view shows empty-state placeholder; view=%q", view)
+	}
+}
+
+// TestForensicsLoadingState verifies the forensics body shows a "loading"
+// placeholder while the async analytics.Build is in flight (before any
+// AnalyticsLoadedMsg arrives). Distinct from the "no sessions yet" case.
+func TestForensicsLoadingState(t *testing.T) {
+	m := tui.NewModel(&fakeRefresher{})
+	m = tui.SetNow(m, frozenNow())
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // → forensics tab; no snapshot delivered yet
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "loading") {
+		t.Errorf("pre-load forensics view should show loading placeholder; view=%q", view)
+	}
+	if strings.Contains(view, "no sessions yet") {
+		t.Errorf("pre-load view must not claim emptiness; view=%q", view)
+	}
+}
+
+// TestForensicsFooterShowsNotice verifies that an async-op notice set
+// on m.notice (e.g. a worktree prune result that arrived while the user
+// was on the forensics tab) is rendered in the footer, mirroring the
+// operational footer's behavior.
+func TestForensicsFooterShowsNotice(t *testing.T) {
+	m := buildForensicsModel(t, populatedSnap(), 140, 30)
+	m = tui.SetNotice(m, "pruned feat/auth")
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "pruned feat/auth") {
+		t.Errorf("forensics footer dropped notice; view=%q", view)
 	}
 }
 

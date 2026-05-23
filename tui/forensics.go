@@ -155,11 +155,17 @@ func (m Model) renderForensicsSubTabBar(width int) string {
 	return "  " + strings.Join(parts, sep)
 }
 
-// renderForensicsBody renders the body area. When the snapshot has no
-// sessions the empty-state placeholder is returned. Otherwise dispatches
-// to the renderer for the active sub-view.
+// renderForensicsBody renders the body area. Three states:
+//   - not yet loaded (the async tea.Cmd hasn't returned) → "loading…"
+//   - loaded but the snapshot has no data in any of the four sub-fields
+//     → "(no sessions yet)"
+//   - otherwise dispatch to the per-view renderer, which is responsible
+//     for its own view-specific empty case (e.g. "no spend data in window").
 func (m Model) renderForensicsBody(width int) string {
-	if len(m.analytics.Sessions) == 0 {
+	if !m.analyticsLoaded {
+		return dimStyle.Render("  loading…")
+	}
+	if snapshotIsEmpty(m.analytics) {
 		return dimStyle.Render("  (no sessions yet)")
 	}
 	now := m.now()
@@ -177,7 +183,21 @@ func (m Model) renderForensicsBody(width int) string {
 	}
 }
 
+// snapshotIsEmpty is true when the snapshot has nothing to show in any
+// of the four sub-views. Used to distinguish "store has no data" from
+// "store has data but the current window/filter excludes it".
+func snapshotIsEmpty(s analytics.Snapshot) bool {
+	return len(s.Days) == 0 && len(s.Sessions) == 0 && len(s.Tools) == 0 && len(s.Worktrees) == 0
+}
+
 func (m Model) renderForensicsFooter(width int) string {
+	// Transient notices set by async ops (prune, kill, create, PR open,
+	// shell drop) are stored on m.notice regardless of which tab is
+	// active. The operational footer renders them first; mirror that
+	// here so a tab-switch mid-operation doesn't drop user feedback.
+	if m.notice != "" {
+		return "  " + m.notice
+	}
 	help := keyStyle.Render("[tab]") + " " + keyDescStyle.Render("back to ops") + "  " +
 		keyDescStyle.Render("·") + "  " +
 		keyStyle.Render("[1-4]") + " " + keyDescStyle.Render("view") + "  " +
