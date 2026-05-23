@@ -53,6 +53,9 @@ Tests are the merge gate, especially for TUI work. **`docs/validation.md` is the
 - **When a golden changes:** read the diff, decide if it's intentional, then `go test ./tui -update` to re-bake and `git diff tui/testdata/golden/` to eyeball the new frames before committing. Goldens are still TDD-compatible: write or extend the demo script first, watch the golden diff fail, then make the code produce the frame you want.
 - **Don't skip the demo loop on TUI changes.** Goldens prove the strings render; the demo script proves the pipeline wired them. Both, not either.
 - **Don't loosen tests to make CI green.** If a test fails, it's telling you something. Fix the code, or update the golden when the change is intentional and reviewed.
+- **`scenarioAnalytics()` (in `tui/golden_helpers_test.go`) hardcodes `Duration` / `TotalTime` on its fixtures**, so changes to `analytics/` calculation logic don't ripple into TUI golden tests. Validate analytics-layer changes with `./canopy demo`, not goldens.
+- **`buildAnalyticsModel(t, view, snap)` (same file) translates `tui.ViewX` to digit-key sends** via a hardcoded switch. When reordering forensics sub-tabs in `tui/forensics.go`, update this helper's switch in sync — otherwise every analytics-view golden silently renders the wrong sub-view.
+- **`tui/testdata/scripts/forensics_open.txt` couples sub-tab digit-key sends to capture filenames.** When the forensics sub-tab order changes, update both — the keys AND the per-view filenames — or the captures land under misleading names.
 
 ## Architecture
 
@@ -63,7 +66,7 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - `procs/` — process listing by cwd. macOS-first (sysctl `kern.proc.all` + `proc_pidinfo` + `KERN_PROCARGS2`, no cgo); Linux supported (`/proc/*/cwd`). Other platforms return `ErrUnsupported` and the aggregator soft-degrades.
 - `pr/` — `gh` CLI wrapper with a 30s cache. Single `gh pr list --json …` per repo.
 - `aggregator/` — joins all four sources into per-worktree state. Owns `CwdPrefix` correlation. Provides `Snapshot` and `Subscribe`.
-- `tui/` — bubbletea views. Operational tab today; analytical tab is v2.
+- `tui/` — bubbletea views. Operational tab today; analytical tab is v2. `prettyModelName` (in `forensics_tools.go`) is the canonical display helper for model identifiers (`claude-opus-4-7` → `Opus 4.7`, drops date suffixes) — use it wherever model names appear in user-facing text.
 - `cmd/` — cobra entrypoints. `demo` is real; `worktree`, `prune`, `sessions` are intentional stubs (`stub.go` → "not yet implemented") so the surface can grow without a rewrite.
 - `internal/ansi/` — strips ANSI escapes for golden comparisons.
 - `internal/demo/` — sandbox repo + fixture setup that the `demo` subcommand drives.
@@ -89,6 +92,7 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - If domain logic starts leaking into `sessions/`, say so.
 - Stay opinionated about small/understandable code over large libraries.
 - Aesthetics are a first-class feature, not polish at the end.
+- Do not use the `superpowers` plugin (brainstorming / writing-plans / writing-specs / subagent-driven-development) on this project. The overhead doesn't fit how Jonas works here — go straight from conversation to implementation.
 
 ## Issue scoping
 
