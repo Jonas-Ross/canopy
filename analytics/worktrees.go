@@ -38,7 +38,14 @@ func PerWorktree(store *sessions.Store, repoRoot string, since time.Time) ([]Wor
 			agg[path] = w
 		}
 		w.SessionCount++
-		w.TotalTime += sess.UpdatedAt.Sub(sess.StartedAt)
+		// TotalTime is the gap-capped active duration (see sessionStats)
+		// rather than wallclock — without the cap a single abandoned
+		// session can show as many hours of "work."
+		_, active, err := sessionStats(store, sess.ID)
+		if err != nil {
+			return nil, err
+		}
+		w.TotalTime += active
 		if sess.UpdatedAt.After(w.LastSeen) {
 			w.LastSeen = sess.UpdatedAt
 		}

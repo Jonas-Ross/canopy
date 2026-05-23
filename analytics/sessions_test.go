@@ -2,7 +2,6 @@ package analytics
 
 import (
 	"testing"
-	"time"
 )
 
 func TestRecentSessions_topNByUpdatedAt(t *testing.T) {
@@ -37,8 +36,13 @@ func TestRecentSessions_topNByUpdatedAt(t *testing.T) {
 	if got[1].Worktree != "/repo/.worktrees/feat+auth" {
 		t.Errorf("worktree should be the deepest cwd: %q", got[1].Worktree)
 	}
-	if got[1].Duration != time.Hour {
-		t.Errorf("duration should be UpdatedAt-StartedAt: %v", got[1].Duration)
+	// Duration is the gap-capped active time (see sessionStats), not
+	// the raw wallclock 1h. The fixture emits the user prompt at
+	// `started` and the assistant turn at `updated` (1h apart, capped
+	// to 10m); the extra prompts share the assistant timestamp and
+	// contribute zero additional gap. So we expect exactly maxIdleGap.
+	if got[1].Duration != maxIdleGap {
+		t.Errorf("duration: got %v, want %v (one capped gap)", got[1].Duration, maxIdleGap)
 	}
 }
 

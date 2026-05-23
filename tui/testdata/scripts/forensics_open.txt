@@ -1,19 +1,20 @@
 # Open the forensics tab and capture each sub-view.
+# Tab order: 1=tools (default), 2=worktrees, 3=spend, 4=sessions.
 width 140
 height 40
 wait 200ms
 key tab
 wait 200ms
-capture /tmp/canopy-forensics-spend.ansi
+capture /tmp/canopy-forensics-tools.ansi
 keys 2
 wait 100ms
-capture /tmp/canopy-forensics-sessions.ansi
+capture /tmp/canopy-forensics-worktrees.ansi
 keys 3
 wait 100ms
-capture /tmp/canopy-forensics-tools.ansi
+capture /tmp/canopy-forensics-spend.ansi
 keys 4
 wait 100ms
-capture /tmp/canopy-forensics-worktrees.ansi
+capture /tmp/canopy-forensics-sessions.ansi
 key tab
 wait 100ms
 capture /tmp/canopy-back-to-ops.ansi

@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"sort"
+	"time"
 
 	"github.com/jonasross/canopy/sessions"
 )
@@ -28,16 +29,16 @@ func RecentSessions(store *sessions.Store, n int) ([]SessionSummary, error) {
 		if err := store.Hydrate(sess); err != nil {
 			return nil, err
 		}
-		pc, err := promptCount(store, sess)
+		prompts, active, err := sessionStats(store, sess.ID)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, summarize(sess, pc))
+		out = append(out, summarize(sess, prompts, active))
 	}
 	return out, nil
 }
 
-func summarize(sess *sessions.Session, prompts int) SessionSummary {
+func summarize(sess *sessions.Session, prompts int, active time.Duration) SessionSummary {
 	worktree := ""
 	if len(sess.Cwds) > 0 {
 		worktree = sess.Cwds[len(sess.Cwds)-1] // deepest / most-recent
@@ -52,7 +53,7 @@ func summarize(sess *sessions.Session, prompts int) SessionSummary {
 		Worktree:    worktree,
 		StartedAt:   sess.StartedAt,
 		UpdatedAt:   sess.UpdatedAt,
-		Duration:    sess.UpdatedAt.Sub(sess.StartedAt),
+		Duration:    active,
 		Prompts:     prompts,
 		ToolCalls:   tools,
 		Tokens:      sess.Tokens,
@@ -60,19 +61,47 @@ func summarize(sess *sessions.Session, prompts int) SessionSummary {
 	}
 }
 
-// promptCount counts the number of genuine user prompts in the session.
-// Tool-result lines are surfaced by the sessions package as EventToolResult
-// (not EventUser), so every EventUser event is a real user prompt.
-// Any iteration error is returned to the caller.
-func promptCount(store *sessions.Store, sess *sessions.Session) (int, error) {
-	count := 0
-	for ev, err := range store.Events(sess.ID) {
-		if err != nil {
-			return 0, err
+// maxIdleGap is the threshold beyond which a between-events gap is
+// treated as inactivity (the user walked away) rather than engaged
+// time. Caps each individual gap; total active time is the sum of
+// gaps each capped at this ceiling.
+//
+// 10 min covers normal thinking pauses and short reading breaks
+// without inflating totals for sessions left open overnight. Tune
+// here if real usage diverges.
+const maxIdleGap = 10 * time.Minute
+
+// sessionStats walks a session's events once and returns the user
+// prompt count and the gap-capped active duration. Active duration
+// sums per-event-gap durations, capping each at maxIdleGap; this
+// replaces the older wallclock UpdatedAt-StartedAt formula, which
+// over-counted abandoned sessions (one prompt, opened and forgotten,
+// could show as many hours).
+//
+// Tool-result lines are surfaced by the sessions package as
+// EventToolResult (not EventUser), so every EventUser is a real
+// user prompt.
+func sessionStats(store *sessions.Store, sessionID string) (prompts int, active time.Duration, err error) {
+	var prev time.Time
+	for ev, e := range store.Events(sessionID) {
+		if e != nil {
+			return 0, 0, e
 		}
 		if ev.Kind == sessions.EventUser {
-			count++
+			prompts++
 		}
+		if ev.Timestamp.IsZero() {
+			continue
+		}
+		if !prev.IsZero() {
+			if gap := ev.Timestamp.Sub(prev); gap > 0 {
+				if gap > maxIdleGap {
+					gap = maxIdleGap
+				}
+				active += gap
+			}
+		}
+		prev = ev.Timestamp
 	}
-	return count, nil
+	return prompts, active, nil
 }

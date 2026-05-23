@@ -28,15 +28,18 @@ func TestPerWorktree_groupsByCwd(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("want 2 worktree rows, got %d: %+v", len(got), got)
 	}
-	// Sorted DESC by TotalTime: feat+auth (2h) before /repo (1h).
+	// TotalTime is gap-capped active duration (see sessionStats), not
+	// wallclock. Each fixture session has one user→assistant gap of 1h,
+	// capped to maxIdleGap. feat+auth has 2 such sessions → 2*maxIdleGap;
+	// /repo has 1 session → maxIdleGap. Sort is DESC by TotalTime.
 	if got[0].Path != "/repo/.worktrees/feat+auth" {
 		t.Errorf("first row should be feat+auth, got %q", got[0].Path)
 	}
 	if got[0].SessionCount != 2 {
 		t.Errorf("feat+auth SessionCount: got %d, want 2", got[0].SessionCount)
 	}
-	if got[0].TotalTime != 2*time.Hour {
-		t.Errorf("feat+auth TotalTime: got %v, want 2h", got[0].TotalTime)
+	if want := 2 * maxIdleGap; got[0].TotalTime != want {
+		t.Errorf("feat+auth TotalTime: got %v, want %v (2 capped gaps)", got[0].TotalTime, want)
 	}
 	// LastSeen should be the max UpdatedAt for that worktree.
 	wantLastSeen := day(5, 22, 15)
@@ -46,8 +49,8 @@ func TestPerWorktree_groupsByCwd(t *testing.T) {
 	if got[1].Path != "/repo" {
 		t.Errorf("second row should be /repo, got %q", got[1].Path)
 	}
-	if got[1].TotalTime != time.Hour {
-		t.Errorf("/repo TotalTime: got %v, want 1h", got[1].TotalTime)
+	if got[1].TotalTime != maxIdleGap {
+		t.Errorf("/repo TotalTime: got %v, want %v (one capped gap)", got[1].TotalTime, maxIdleGap)
 	}
 }
 
