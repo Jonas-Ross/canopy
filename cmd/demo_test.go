@@ -139,12 +139,16 @@ func TestDemoScript_ProcsCollapseExpand(t *testing.T) {
 		t.Errorf("collapsed frame missing top claude pid 11201:\n%s", collapsed)
 	}
 
-	// Expanded: every proc visible, no "more" line.
-	if !strings.Contains(expanded, "Cursor Helper") {
-		t.Errorf("expanded frame missing tail proc 'Cursor Helper':\n%s", expanded)
+	// Expanded: more procs visible than collapsed; the budget clamp still
+	// applies when sessions rows consume height, so not all procs may fit.
+	// The invariant is that expanded shows more procs than collapsed (5→12+).
+	collapsedProcs := countLines(collapsed, "zsh")
+	expandedProcs := countLines(expanded, "zsh")
+	if expandedProcs <= collapsedProcs {
+		t.Errorf("expanded procs (%d zsh rows) should exceed collapsed (%d); toggle did not expand:\n%s", expandedProcs, collapsedProcs, expanded)
 	}
-	if strings.Contains(expanded, "more (P)") {
-		t.Errorf("expanded frame should not contain '+N more (P)':\n%s", expanded)
+	if !strings.Contains(expanded, "gopls") {
+		t.Errorf("expanded frame missing gopls proc (should be visible when expanded):\n%s", expanded)
 	}
 
 	// Recollapsed: matches collapsed view (idempotent toggle).

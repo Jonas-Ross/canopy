@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jonasross/canopy/aggregator"
+	"github.com/jonasross/canopy/analytics"
 	"github.com/jonasross/canopy/internal/demo"
 	"github.com/jonasross/canopy/pr"
 	"github.com/jonasross/canopy/sessions"
@@ -49,16 +50,27 @@ func TestBuild_CreatesValidSandbox(t *testing.T) {
 	// Live session is attributed to the feat/auth worktree (most-recent cwd
 	// match) and the older one to chore/deps.
 	authSessions := store.SessionsByCwdPrefix(f.WorktreePath(demo.BranchAuth))
-	if len(authSessions) != 1 {
-		t.Fatalf("feat/auth session count = %d, want 1", len(authSessions))
+	if len(authSessions) < 1 {
+		t.Fatalf("feat/auth session count = %d, want >= 1", len(authSessions))
 	}
-	if authSessions[0].Model != "claude-opus-4-7" {
-		t.Errorf("feat/auth session model = %q, want claude-opus-4-7", authSessions[0].Model)
+	// The live session (11111111-…) uses opus; it should be present.
+	var foundLiveAuth bool
+	for _, s := range authSessions {
+		if s.ID == "11111111-1111-1111-1111-111111111111" {
+			foundLiveAuth = true
+			if s.Model != "claude-opus-4-7" {
+				t.Errorf("feat/auth live session model = %q, want claude-opus-4-7", s.Model)
+			}
+			break
+		}
+	}
+	if !foundLiveAuth {
+		t.Errorf("feat/auth live session (11111111-…) missing from store")
 	}
 
 	depsSessions := store.SessionsByCwdPrefix(f.WorktreePath(demo.BranchDeps))
-	if len(depsSessions) != 1 {
-		t.Fatalf("chore/deps session count = %d, want 1", len(depsSessions))
+	if len(depsSessions) < 1 {
+		t.Fatalf("chore/deps session count = %d, want >= 1", len(depsSessions))
 	}
 }
 
@@ -160,4 +172,77 @@ func branchKeys(m map[string]aggregator.WorktreeState) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestBuild_HistoricalSessionsForForensics verifies that the fixture seeds
+// enough historical sessions for the forensics tab to render meaningful data.
+func TestBuild_HistoricalSessionsForForensics(t *testing.T) {
+	demo.RequireGit(t)
+
+	f, err := demo.Build("")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Cleanup() })
+
+	store, err := sessions.Open(f.SessionsRoot)
+	if err != nil {
+		t.Fatalf("sessions.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	now := time.Now()
+	snap, err := analytics.Build(store, now)
+	if err != nil {
+		t.Fatalf("analytics.Build: %v", err)
+	}
+
+	// At least 12 sessions in the snapshot.
+	if len(snap.Sessions) < 12 {
+		t.Errorf("Sessions count = %d, want >= 12", len(snap.Sessions))
+	}
+
+	// Span at least 8 distinct UTC days within the last 30.
+	distinctDays := make(map[string]struct{})
+	for _, s := range snap.Sessions {
+		day := s.UpdatedAt.UTC().Format("2006-01-02")
+		distinctDays[day] = struct{}{}
+	}
+	if len(distinctDays) < 8 {
+		t.Errorf("distinct days = %d, want >= 8; days: %v", len(distinctDays), distinctDays)
+	}
+
+	// At least 2 distinct models.
+	distinctModels := make(map[string]struct{})
+	for _, s := range snap.Sessions {
+		if s.Model != "" {
+			distinctModels[s.Model] = struct{}{}
+		}
+	}
+	if len(distinctModels) < 2 {
+		t.Errorf("distinct models = %d, want >= 2; models: %v", len(distinctModels), distinctModels)
+	}
+
+	// At least 5 tool types used across all sessions.
+	if len(snap.Tools) < 5 {
+		t.Errorf("distinct tools = %d, want >= 5; tools: %v", len(snap.Tools), snap.Tools)
+	}
+
+	// The 2 original sessions are still present.
+	foundOpus := false
+	foundSonnet := false
+	for _, s := range snap.Sessions {
+		if s.ID == "11111111-1111-1111-1111-111111111111" {
+			foundOpus = true
+		}
+		if s.ID == "22222222-2222-2222-2222-222222222222" {
+			foundSonnet = true
+		}
+	}
+	if !foundOpus {
+		t.Errorf("original opus session (11111111-…) not found in snapshot")
+	}
+	if !foundSonnet {
+		t.Errorf("original sonnet session (22222222-…) not found in snapshot")
+	}
 }
