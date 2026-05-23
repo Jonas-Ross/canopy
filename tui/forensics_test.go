@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -221,6 +222,59 @@ func TestForensicsLoadingState(t *testing.T) {
 	}
 	if strings.Contains(view, "no sessions yet") {
 		t.Errorf("pre-load view must not claim emptiness; view=%q", view)
+	}
+}
+
+// TestForensicsLoadErrorPersistsAcrossKeypress verifies that a failed
+// analytics load surfaces a sticky error in the forensics body — not
+// just a transient notice — so the user can still see it after the
+// next keypress clears m.notice. Without persistence, a failed first
+// load is indistinguishable from a genuinely empty store.
+func TestForensicsLoadErrorPersistsAcrossKeypress(t *testing.T) {
+	m := tui.NewModel(&fakeRefresher{})
+	m = tui.SetNow(m, frozenNow())
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // → forensics tab
+	loadErr := errors.New("store closed")
+	m, _ = m.Update(tui.AnalyticsLoadedMsg{Err: loadErr})
+
+	// Sanity: the error appears as a transient notice on first render.
+	if view := stripANSI(m.View()); !strings.Contains(view, "store closed") {
+		t.Fatalf("expected initial error in view; view=%q", view)
+	}
+
+	// Press 'h' (a no-op sub-tab nav key) — handleKey clears m.notice.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+
+	view := stripANSI(m.View())
+	if strings.Contains(view, "no sessions yet") {
+		t.Errorf("failed load should not look like empty store; view=%q", view)
+	}
+	if !strings.Contains(view, "store closed") {
+		t.Errorf("error should persist in body after keypress; view=%q", view)
+	}
+}
+
+// TestForensicsSuccessfulLoadClearsError verifies a subsequent
+// successful load wipes the persisted analyticsErr so the body's sticky
+// error state goes away once data is available. The transient notice is
+// already cleared by the retry keypress in the real flow.
+func TestForensicsSuccessfulLoadClearsError(t *testing.T) {
+	m := tui.NewModel(&fakeRefresher{})
+	m = tui.SetNow(m, frozenNow())
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tui.AnalyticsLoadedMsg{Err: errors.New("transient")})
+	// 'r' triggers the retry; handleKey clears the transient m.notice.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m, _ = m.Update(tui.AnalyticsLoadedMsg{Snapshot: populatedSnap()})
+
+	view := stripANSI(m.View())
+	if strings.Contains(view, "analytics unavailable") {
+		t.Errorf("successful load should clear sticky error; view=%q", view)
+	}
+	if strings.Contains(view, "transient") {
+		t.Errorf("error string should be gone after success; view=%q", view)
 	}
 }
 

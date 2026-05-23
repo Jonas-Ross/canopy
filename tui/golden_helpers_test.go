@@ -330,17 +330,23 @@ func scenarioAnalytics() analytics.Snapshot {
 
 	return analytics.Snapshot{
 		GeneratedAt: now,
-		WindowStart: now.Add(-30 * 24 * time.Hour),
+		// WindowStart = UTC midnight 29 days before now's UTC day —
+		// inclusive 30-day range when day-truncated by the renderer.
+		WindowStart: time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -29),
 		WindowEnd:   now,
 		Days:        days,
 		Sessions:    sessions8,
 		Tools:       tools,
 		Worktrees:   worktrees,
-		// SessionCountByModel reflects the full window (would exceed
-		// len(Sessions) in a real store with >recentSessionsLimit sessions).
+		// SessionCountByModel reflects the full window and is intentionally
+		// out of sync with the visible per-model counts in sessions8 above
+		// (4 opus / 4 sonnet) — this stands in for a real store where the
+		// length-capped Sessions slice undercounts what the tools header
+		// must report, and ensures the golden fails if the renderer
+		// regresses to counting Snapshot.Sessions.
 		SessionCountByModel: map[string]int{
-			"claude-opus-4-7":   4,
-			"claude-sonnet-4-6": 4,
+			"claude-opus-4-7":   7,
+			"claude-sonnet-4-6": 5,
 		},
 	}
 }

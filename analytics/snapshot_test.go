@@ -28,8 +28,11 @@ func TestBuild_populatesAllSubfields(t *testing.T) {
 	if !snap.GeneratedAt.Equal(now) {
 		t.Errorf("GeneratedAt: got %v, want %v", snap.GeneratedAt, now)
 	}
-	// WindowStart must be 30 days before now.
-	wantStart := now.Add(-snapshotWindow)
+	// WindowStart must be 29 days before now's UTC midnight, giving an
+	// inclusive 30-day range when rendered.
+	nowUTC := now.UTC()
+	endDay := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+	wantStart := endDay.AddDate(0, 0, -29)
 	if !snap.WindowStart.Equal(wantStart) {
 		t.Errorf("WindowStart: got %v, want %v", snap.WindowStart, wantStart)
 	}

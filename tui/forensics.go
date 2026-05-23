@@ -158,15 +158,25 @@ func (m Model) renderForensicsSubTabBar(width int) string {
 	return "  " + strings.Join(parts, sep)
 }
 
-// renderForensicsBody renders the body area. Three states:
+// renderForensicsBody renders the body area. Four states:
 //   - not yet loaded (the async tea.Cmd hasn't returned) → "loading…"
+//   - load failed and no prior snapshot → sticky error
+//     ("analytics unavailable: <err> · press r to retry")
 //   - loaded but the snapshot has no data in any of the four sub-fields
 //     → "(no sessions yet)"
 //   - otherwise dispatch to the per-view renderer, which is responsible
 //     for its own view-specific empty case (e.g. "no spend data in window").
+//
+// When a prior snapshot exists, the persisted analyticsErr is reflected only
+// via the transient notice in the footer — stale data with a hint is more
+// useful than hiding everything behind an error screen.
 func (m Model) renderForensicsBody(width int) string {
 	if !m.analyticsLoaded {
 		return dimStyle.Render("  loading…")
+	}
+	if m.analyticsErr != nil && snapshotIsEmpty(m.analytics) {
+		return errorStyle.Render("  analytics unavailable: "+m.analyticsErr.Error()) +
+			dimStyle.Render("  ·  press r to retry")
 	}
 	if snapshotIsEmpty(m.analytics) {
 		return dimStyle.Render("  (no sessions yet)")

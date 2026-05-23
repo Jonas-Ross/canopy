@@ -106,9 +106,12 @@ type Model struct {
 
 	// analytics holds the most recently built analytics snapshot. Populated
 	// asynchronously via loadAnalyticsCmd when the forensics tab is entered
-	// or when r is pressed on that tab.
+	// or when r is pressed on that tab. analyticsErr persists across keypresses
+	// so a failed first load is distinguishable from a genuine empty store —
+	// cleared on the next successful load or when the user triggers a retry.
 	analytics       analytics.Snapshot
 	analyticsLoaded bool
+	analyticsErr    error
 
 	now func() time.Time
 }
@@ -255,17 +258,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, refreshCmd(m.refresher)
 
 	case AnalyticsLoadedMsg:
-		// Error path: surface as a notice and flip analyticsLoaded so the
-		// loading placeholder doesn't sit forever. Keep the previous
-		// snapshot (if any) visible behind the notice. Retry via r.
+		// Error path: surface as a transient notice AND persist on
+		// analyticsErr so the forensics body can render a sticky error
+		// state after the next keypress clears the notice. Keep any prior
+		// snapshot visible — retry via r.
 		if msg.Err != nil {
 			m.notice = errorStyle.Render("analytics: " + msg.Err.Error())
+			m.analyticsErr = msg.Err
 			m.analyticsLoaded = true
 			return m, nil
 		}
 		if !msg.Snapshot.GeneratedAt.IsZero() {
 			m.analytics = msg.Snapshot
 			m.analyticsLoaded = true
+			m.analyticsErr = nil
 		}
 		return m, nil
 
