@@ -47,6 +47,28 @@ func TestForensicsToolsView_topToolsPresent(t *testing.T) {
 	}
 }
 
+// TestForensicsToolsView_headerSessionCountFromWindowNotSnapshot regression-
+// guards the case where Snapshot.Sessions is capped (recentSessionsLimit=20)
+// but the analytics window has more sessions for a model: the tools header
+// must show the full-window count from SessionCountByModel, not 0 or a
+// truncated count derived from the capped Sessions slice.
+func TestForensicsToolsView_headerSessionCountFromWindowNotSnapshot(t *testing.T) {
+	snap := scenarioAnalytics()
+	snap.Sessions = nil // simulate a model whose sessions were all evicted by the cap
+	snap.SessionCountByModel = map[string]int{
+		"claude-opus-4-7":   42, // honest window count
+		"claude-sonnet-4-6": 18,
+	}
+	m := buildAnalyticsModel(t, tui.ViewTools, snap)
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "42 sessions") {
+		t.Errorf("tools header should show 42 sessions for opus (full-window count); view=\n%s", view)
+	}
+	if !strings.Contains(view, "18 sessions") {
+		t.Errorf("tools header should show 18 sessions for sonnet; view=\n%s", view)
+	}
+}
+
 // TestForensicsToolsView_otherCountExceedsMaxNoPanic regression-guards a
 // real workload where the long-tail "other" rollup count is larger than
 // the single top-5 max (the bar normalization basis) — without the cells

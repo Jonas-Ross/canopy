@@ -34,13 +34,25 @@ func Build(store *sessions.Store, now time.Time) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 
+	sessionsByModel := map[string]int{}
+	for sess := range store.Sessions() {
+		if sess.UpdatedAt.Before(since) || sess.UpdatedAt.After(now) {
+			continue
+		}
+		if sess.Model == "" {
+			continue
+		}
+		sessionsByModel[sess.Model]++
+	}
+
 	return Snapshot{
-		GeneratedAt: now,
-		WindowStart: since,
-		WindowEnd:   now,
-		Days:        days,
-		Sessions:    recent,
-		Tools:       tools,
-		Worktrees:   wts,
+		GeneratedAt:         now,
+		WindowStart:         since,
+		WindowEnd:           now,
+		Days:                days,
+		Sessions:            recent,
+		Tools:               tools,
+		Worktrees:           wts,
+		SessionCountByModel: sessionsByModel,
 	}, nil
 }

@@ -61,7 +61,13 @@ type Snapshot struct {
 	WindowEnd   time.Time
 
 	Days      []DayBucket       // sorted DESC by Date for render
-	Sessions  []SessionSummary  // sorted DESC by UpdatedAt
+	Sessions  []SessionSummary  // sorted DESC by UpdatedAt, capped at recentSessionsLimit
 	Tools     []ToolUsage       // sorted by (Model asc, Count desc)
 	Worktrees []WorktreeSummary // sorted DESC by TotalTime
+
+	// SessionCountByModel is the count of sessions in [WindowStart,
+	// WindowEnd] keyed by Model. Distinct from len(Sessions) because
+	// the Sessions slice is capped — this count is uncapped and is
+	// what the tools view should display in its per-model header.
+	SessionCountByModel map[string]int
 }

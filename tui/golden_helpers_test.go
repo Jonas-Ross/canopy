@@ -336,6 +336,12 @@ func scenarioAnalytics() analytics.Snapshot {
 		Sessions:    sessions8,
 		Tools:       tools,
 		Worktrees:   worktrees,
+		// SessionCountByModel reflects the full window (would exceed
+		// len(Sessions) in a real store with >recentSessionsLimit sessions).
+		SessionCountByModel: map[string]int{
+			"claude-opus-4-7":   4,
+			"claude-sonnet-4-6": 4,
+		},
 	}
 }
 

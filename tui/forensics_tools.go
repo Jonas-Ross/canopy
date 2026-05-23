@@ -15,12 +15,14 @@ const (
 
 // renderToolsView renders the tools sub-view: per-model section header,
 // top-5 tool bars, and an "other" row collapsing the remainder.
-func renderToolsView(tools []analytics.ToolUsage, sessions []analytics.SessionSummary, width int) string {
+// sessionCountByModel must reflect the FULL analytics window — passing the
+// length-capped Snapshot.Sessions here would undercount models whose
+// session counts exceed recentSessionsLimit.
+func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string]int, width int) string {
 	if len(tools) == 0 {
 		return dimStyle.Render("  no tool data")
 	}
 
-	// Group tools by model. Collect models in sorted order.
 	type toolRow struct {
 		tool  string
 		count int
@@ -36,12 +38,6 @@ func renderToolsView(tools []analytics.ToolUsage, sessions []analytics.SessionSu
 		models = append(models, m)
 	}
 	sort.Strings(models)
-
-	// Build session-count and total-call summaries per model.
-	sessionCountByModel := make(map[string]int)
-	for _, s := range sessions {
-		sessionCountByModel[s.Model]++
-	}
 
 	var sb strings.Builder
 	sb.Grow(512)
