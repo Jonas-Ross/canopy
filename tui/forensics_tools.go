@@ -20,8 +20,6 @@ func renderToolsView(tools []analytics.ToolUsage, sessions []analytics.SessionSu
 		return dimStyle.Render("  no tool data")
 	}
 
-	_ = width // reserved
-
 	// Group tools by model. Collect models in sorted order.
 	type toolRow struct {
 		tool  string

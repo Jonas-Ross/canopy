@@ -6,16 +6,14 @@ import (
 	"github.com/jonasross/canopy/sessions"
 )
 
-// Build assembles the four sub-views in one call. Window is fixed at
-// 30 days back from now; tune in a later iteration if needed.
-// RecentSessions is capped at 20 — enough rows to fill a terminal page;
-// cheaper than hydrating everything.
 const (
 	snapshotWindow      = 30 * 24 * time.Hour
 	recentSessionsLimit = 20
 )
 
-// Build computes a full Snapshot against store at the given instant.
+// Build computes a full Snapshot against store at the given instant —
+// per-day spend, recent sessions, tool distribution, and per-worktree
+// totals, all bounded to the 30-day window ending at now.
 func Build(store *sessions.Store, now time.Time) (Snapshot, error) {
 	since := now.Add(-snapshotWindow)
 

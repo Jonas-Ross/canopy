@@ -89,8 +89,6 @@ func renderSessionsView(sessions []analytics.SessionSummary, now time.Time, widt
 		return dimStyle.Render("  no session data")
 	}
 
-	_ = width // reserved for future column-hiding
-
 	const (
 		startedW  = 8  // "HH:MM" or "Mon DD"
 		modelW    = 14 // "sonnet-4-6" fits; "opus-4-7" fits

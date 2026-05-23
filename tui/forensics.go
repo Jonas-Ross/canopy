@@ -73,11 +73,9 @@ func (m Model) updateForensicsMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.forensicsView = viewWorktrees
 			return m, nil
 		case 'h':
-			// Cycle backward with wrap-around.
 			m.forensicsView = (m.forensicsView + forensicsViewCount - 1) % forensicsViewCount
 			return m, nil
 		case 'l':
-			// Cycle forward with wrap-around.
 			m.forensicsView = (m.forensicsView + 1) % forensicsViewCount
 			return m, nil
 		case keyQuit:
@@ -146,7 +144,6 @@ func (m Model) renderForensicsView() string {
 // "  spend · sessions · tools · worktrees" with the active label in
 // tabActive style and inactive labels in dimStyle. Separators use ruleStyle.
 func (m Model) renderForensicsSubTabBar(width int) string {
-	_ = width // reserved for future truncation
 	views := [forensicsViewCount]forensicsView{viewSpend, viewSessions, viewTools, viewWorktrees}
 	sep := " " + ruleStyle.Render("·") + " "
 

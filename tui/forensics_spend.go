@@ -126,7 +126,6 @@ func renderSpendView(days []analytics.DayBucket, windowStart, windowEnd time.Tim
 	//   cache-r : 16   "cache-r 8.1M"
 	//   cache-c : 16   "cache-c 1.2M"
 	//   total   : 14   "total 24.9M"
-	_ = width // reserved for future column-hiding at narrow widths
 
 	const (
 		barCol    = sparkWidth + 2 // bar + 2 spaces padding
@@ -137,15 +136,12 @@ func renderSpendView(days []analytics.DayBucket, windowStart, windowEnd time.Tim
 	var sb strings.Builder
 	sb.Grow(1024)
 
-	// Header.
 	header := fmt.Sprintf("  spend · last 30 days  filter: all")
 	sb.WriteString(dimStyle.Render(header))
 	sb.WriteByte('\n')
 
-	// Row accumulators for totals.
 	var totIn, totOut, totCR, totCC int
 
-	// Iterate from newest to oldest, including zero-activity gap days.
 	cur := newest
 	for !cur.Before(oldest) {
 		key := cur.Format("2006-01-02")
@@ -157,7 +153,6 @@ func renderSpendView(days []analytics.DayBucket, windowStart, windowEnd time.Tim
 		sb.WriteString("   ")
 
 		if !active {
-			// Zero-activity gap day.
 			sb.WriteString(dimStyle.Render("·"))
 			sb.WriteByte('\n')
 		} else {

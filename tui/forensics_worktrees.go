@@ -16,8 +16,6 @@ func renderWorktreesView(worktrees []analytics.WorktreeSummary, now time.Time, w
 		return dimStyle.Render("  no worktree data")
 	}
 
-	_ = width // reserved
-
 	const (
 		worktreeColW = 24 // basename, truncated
 		sessionsColW = 8  // "sessions"
