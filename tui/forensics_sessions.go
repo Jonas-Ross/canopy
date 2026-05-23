@@ -30,15 +30,16 @@ func formatSessionTime(t, now time.Time) string {
 	return fmt.Sprintf("%s %02d", t.UTC().Format("Mon"), t.UTC().Day())
 }
 
-// shortModel converts a full model name to its short display form.
-// "claude-opus-4-7" → "opus-4-7", "claude-sonnet-4-6" → "sonnet-4-6".
-// Unknown prefixes pass through unchanged.
-func shortModel(model string) string {
-	const prefix = "claude-"
-	if strings.HasPrefix(model, prefix) {
-		return model[len(prefix):]
+// formatSessionModel turns a model identifier into its display form
+// for the sessions table. Uses prettyModelName (claude-opus-4-7 →
+// Opus 4.7), then truncates with ellipsis if it still exceeds max
+// runes. Empty input renders as an em-dash placeholder so the column
+// stays honest about missing data.
+func formatSessionModel(model string, max int) string {
+	if model == "" {
+		return truncateWithEllipsis("—", max)
 	}
-	return model
+	return truncateWithEllipsis(prettyModelName(model), max)
 }
 
 // formatDuration formats a session duration in "47m" or "1h 02m" style.
@@ -124,11 +125,11 @@ func renderSessionsView(sessions []analytics.SessionSummary, now time.Time, widt
 		if live {
 			dot = liveStyle.Render("●")
 		} else {
-			dot = dimStyle.Render(" ")
+			dot = " "
 		}
 
 		started := formatSessionTime(s.StartedAt, now)
-		model := shortModel(s.Model)
+		model := formatSessionModel(s.Model, modelW)
 		wt := worktreeLabel(s.Worktree, worktreeW)
 		dur := formatDuration(s.Duration)
 
@@ -137,15 +138,15 @@ func renderSessionsView(sessions []analytics.SessionSummary, now time.Time, widt
 		sb.WriteString(" ")
 		sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", startedW, started)))
 		sb.WriteString("  ")
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", modelW, model)))
+		sb.WriteString(repoStyle.Render(fmt.Sprintf("%-*s", modelW, model)))
 		sb.WriteString("  ")
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", worktreeW, wt)))
+		sb.WriteString(detailValueStyle.Render(fmt.Sprintf("%-*s", worktreeW, wt)))
 		sb.WriteString("  ")
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", durationW, dur)))
+		sb.WriteString(detailValueStyle.Render(fmt.Sprintf("%-*s", durationW, dur)))
 		sb.WriteString("  ")
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("%*d", promptsW, s.Prompts)))
+		sb.WriteString(detailValueStyle.Render(fmt.Sprintf("%*d", promptsW, s.Prompts)))
 		sb.WriteString("  ")
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("%*d", toolsW, s.ToolCalls)))
+		sb.WriteString(detailValueStyle.Render(fmt.Sprintf("%*d", toolsW, s.ToolCalls)))
 		sb.WriteByte('\n')
 	}
 
