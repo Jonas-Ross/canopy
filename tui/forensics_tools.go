@@ -124,7 +124,10 @@ func renderToolsView(tools []analytics.ToolUsage, sessions []analytics.SessionSu
 }
 
 // toolBar returns a filled bar of up to toolBarWidth cells, normalized over
-// maxCount. Uses full-block (█) character.
+// maxCount. Uses full-block (█) character. The cells cap matters for the
+// "other" rollup row: that row's count is the sum of all non-top-5 tools
+// and can exceed maxCount (which is the single highest individual top-5
+// count), which would otherwise produce a negative pad width and panic.
 func toolBar(count, maxCount int) string {
 	if maxCount == 0 || count == 0 {
 		return dimStyle.Render("▏" + strings.Repeat(" ", toolBarWidth-1))
@@ -132,6 +135,9 @@ func toolBar(count, maxCount int) string {
 	cells := (count * toolBarWidth) / maxCount
 	if cells < 1 {
 		cells = 1
+	}
+	if cells > toolBarWidth {
+		cells = toolBarWidth
 	}
 	bar := strings.Repeat("█", cells)
 	pad := strings.Repeat(" ", toolBarWidth-cells)

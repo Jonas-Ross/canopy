@@ -31,11 +31,16 @@ func (v forensicsView) label() string {
 
 // loadAnalyticsCmd returns a tea.Cmd that calls analytics.Build
 // asynchronously. On success it dispatches AnalyticsLoadedMsg; on error
-// it dispatches an empty AnalyticsLoadedMsg (the loaded flag is not set
-// and the placeholder view renders until the next refresh).
+// or a nil store (test fakes are allowed to return nil from
+// SessionStore) it dispatches an empty AnalyticsLoadedMsg, which the
+// Update handler ignores so the existing snapshot (if any) is preserved.
 func loadAnalyticsCmd(r Refresher, now time.Time) tea.Cmd {
 	return func() tea.Msg {
-		snap, err := analytics.Build(r.SessionStore(), now)
+		store := r.SessionStore()
+		if store == nil {
+			return AnalyticsLoadedMsg{}
+		}
+		snap, err := analytics.Build(store, now)
 		if err != nil {
 			return AnalyticsLoadedMsg{}
 		}

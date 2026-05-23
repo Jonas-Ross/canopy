@@ -66,6 +66,21 @@ func truncateWithEllipsis(s string, max int) string {
 	return string(runes[:max-1]) + "…"
 }
 
+// worktreeLabel renders a Session.Worktree path into a human label.
+// filepath.Base("") returns "." and filepath.Base("/") returns "/",
+// both of which read as broken in the sessions table — render an
+// explicit em-dash placeholder so the column is honest about missing data.
+func worktreeLabel(path string, max int) string {
+	if path == "" {
+		return truncateWithEllipsis("—", max)
+	}
+	base := filepath.Base(path)
+	if base == "." || base == "/" {
+		return truncateWithEllipsis("—", max)
+	}
+	return truncateWithEllipsis(base, max)
+}
+
 // renderSessionsView renders the sessions sub-view: header, one row per
 // session sorted DESC by UpdatedAt, with a live-dot (●) prefix for recently
 // active sessions.
@@ -116,7 +131,7 @@ func renderSessionsView(sessions []analytics.SessionSummary, now time.Time, widt
 
 		started := formatSessionTime(s.StartedAt, now)
 		model := shortModel(s.Model)
-		wt := truncateWithEllipsis(filepath.Base(s.Worktree), worktreeW)
+		wt := worktreeLabel(s.Worktree, worktreeW)
 		dur := formatDuration(s.Duration)
 
 		sb.WriteString("  ")

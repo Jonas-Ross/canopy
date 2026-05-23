@@ -49,11 +49,19 @@ func sparkBar(total, maxTotal int) string {
 	if cells < 1 {
 		cells = 1
 	}
-	// Pick glyph: within a single cell, use the partial block proportional
-	// to how the fractional part of the ratio-to-one-cell maps.
-	fraction := ratio * float64(sparkWidth)
-	glyphIdx := int(fraction*float64(len(sparkBlocks))) % len(sparkBlocks)
-	if cells >= sparkWidth {
+	if cells > sparkWidth {
+		cells = sparkWidth
+	}
+	// Pick the trailing glyph based on the fractional cell remainder.
+	// When the ratio lands exactly on a cell boundary (frac == 0), use
+	// the full block rather than wrapping back to the lightest one.
+	cellPosition := ratio * float64(sparkWidth)
+	frac := cellPosition - float64(int(cellPosition))
+	glyphIdx := int(frac * float64(len(sparkBlocks)))
+	if frac == 0 || cells >= sparkWidth {
+		glyphIdx = len(sparkBlocks) - 1
+	}
+	if glyphIdx >= len(sparkBlocks) {
 		glyphIdx = len(sparkBlocks) - 1
 	}
 	glyph := string(sparkBlocks[glyphIdx])
@@ -141,10 +149,12 @@ func renderSpendView(days []analytics.DayBucket, windowStart, windowEnd time.Tim
 			bar := sparkBar(tot, maxTotal)
 			// Pad bar to fixed visual width (sparkWidth cells + spaces).
 			// lipgloss.Width strips ANSI codes and counts display cells.
+			// Guard before Repeat — a future sparkBar change that allows
+			// cells > sparkWidth would otherwise panic on negative count.
 			barVisualW := lipgloss.Width(bar)
-			barPad := strings.Repeat(" ", sparkWidth-barVisualW)
-			if barVisualW > sparkWidth {
-				barPad = ""
+			barPad := ""
+			if barVisualW < sparkWidth {
+				barPad = strings.Repeat(" ", sparkWidth-barVisualW)
 			}
 			sb.WriteString(bar)
 			sb.WriteString(barPad)

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jonasross/canopy/analytics"
 	"github.com/jonasross/canopy/tui"
 )
 
@@ -43,5 +44,30 @@ func TestForensicsToolsView_topToolsPresent(t *testing.T) {
 		if !strings.Contains(view, tool) {
 			t.Errorf("tools view missing tool %q; view=\n%s", tool, view)
 		}
+	}
+}
+
+// TestForensicsToolsView_otherCountExceedsMaxNoPanic regression-guards a
+// real workload where the long-tail "other" rollup count is larger than
+// the single top-5 max (the bar normalization basis) — without the cells
+// cap in toolBar this triggers strings.Repeat with a negative count and
+// panics. See forensics_tools.go:toolBar.
+func TestForensicsToolsView_otherCountExceedsMaxNoPanic(t *testing.T) {
+	snap := scenarioAnalytics()
+	// 8 tools each count=10 for one model: top-5 maxCount=10,
+	// otherRows = 3 tools summing to 30. Unclamped formula:
+	// (30 * 20) / 10 = 60 cells, pad = 20 - 60 = -40 → panic.
+	snap.Tools = nil
+	for _, name := range []string{"A", "B", "C", "D", "E", "F", "G", "H"} {
+		snap.Tools = append(snap.Tools, analytics.ToolUsage{
+			Model: "claude-opus-4-7", Tool: name, Count: 10,
+		})
+	}
+	m := buildAnalyticsModel(t, tui.ViewTools, snap)
+	// Calling View() exercises renderToolsView → toolBar(otherCount, maxCount).
+	// Without the cap this panics; with the cap it returns a clean string.
+	view := m.View()
+	if view == "" {
+		t.Fatalf("expected non-empty view")
 	}
 }
