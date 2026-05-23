@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jonasross/canopy/analytics"
 )
 
@@ -136,6 +137,31 @@ func toolBar(count, maxCount int) string {
 	bar := strings.Repeat("█", cells)
 	pad := strings.Repeat(" ", toolBarWidth-cells)
 	return tabActive.Render(bar) + dimStyle.Render(pad)
+}
+
+// categorizeTool maps a tool name to its (tag, style) pair for the
+// forensics tools view. The tag is always exactly 4 cells wide once
+// rendered (padded to 4 by the caller via fmt.Sprintf("%-4s", tag)).
+// Unknown tools fall through to ("·", toolTagDimStyle).
+//
+// Adding a new tool category is a single switch entry below plus a
+// matching style in tui/style.go.
+func categorizeTool(name string) (tag string, style lipgloss.Style) {
+	if strings.HasPrefix(name, "mcp__") {
+		return "mcp", toolTagMCPStyle
+	}
+	switch name {
+	case "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Grep", "Glob":
+		return "file", toolTagFileStyle
+	case "Bash", "KillShell", "BashOutput", "Monitor":
+		return "exec", toolTagExecStyle
+	case "WebFetch", "WebSearch":
+		return "web", toolTagWebStyle
+	case "Task", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet",
+		"TaskOutput", "TaskStop", "SendMessage", "Skill", "ToolSearch":
+		return "task", toolTagTaskStyle
+	}
+	return "·", toolTagDimStyle
 }
 
 // formatWithCommas formats an integer with comma thousands separators.
