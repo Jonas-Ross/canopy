@@ -210,20 +210,10 @@ func TestForensicsEmptyState_golden(t *testing.T) {
 	assertGolden(t, "forensics_empty", frame(m))
 }
 
-// TestForensicsSubTabBar_golden pins four separate golden frames, one per
-// highlighted sub-view. Four files are cheaper to diff than one combined file.
+// TestForensicsSubTabBar_golden pins the default (spend) sub-tab golden frame.
+// The visual highlight of other sub-tabs is tested via TestForensicsSubTabBar_activeHighlight.
 func TestForensicsSubTabBar_golden(t *testing.T) {
-	for _, tc := range []struct {
-		key    rune
-		golden string
-	}{
-		{'1', "forensics_subtab_spend"},
-		{'2', "forensics_subtab_sessions"},
-		{'3', "forensics_subtab_tools"},
-		{'4', "forensics_subtab_worktrees"},
-	} {
-		m := buildForensicsModel(t, emptySnap(), 140, 30)
-		m, _ = m.Update(sendKey(tc.key))
-		assertGolden(t, tc.golden, frame(m))
-	}
+	m := buildForensicsModel(t, emptySnap(), 140, 30)
+	m, _ = m.Update(sendKey('1'))
+	assertGolden(t, "forensics_subtab_spend", frame(m))
 }
