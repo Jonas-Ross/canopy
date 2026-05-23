@@ -28,6 +28,9 @@ func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string
 		tool  string
 		count int
 	}
+	// tools is (Model asc, Count desc, Tool asc) per analytics.ToolDistribution,
+	// so per-model slices land here count-descending already — rows[:topN]
+	// below is the top N without an extra sort.
 	byModel := make(map[string][]toolRow)
 	for _, t := range tools {
 		byModel[t.Model] = append(byModel[t.Model], toolRow{tool: t.Tool, count: t.Count})
