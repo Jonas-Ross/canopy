@@ -78,8 +78,8 @@ skill/plugin/subagent generated the event), `sourceToolAssistantUUID` /
 `sourceToolUseID` (back-links on tool-result `user` events).
 
 `cwd` is **not** invariant: 9 of the sampled files had 2-3 distinct `cwd` values
-(session `cd`'d into a subdir). The handoff's `CwdPrefix` correlation strategy
-handles this.
+(session `cd`'d into a subdir). The `CwdPrefix` correlation strategy in
+`aggregator` handles this — prefix match, not exact.
 
 ## 5. Conversation events
 

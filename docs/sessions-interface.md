@@ -1,9 +1,9 @@
 # `sessions` package — v1 interface design (M1.0)
 
-Design artifact for the v1 `sessions` Go package. Locked-in API shape,
-ready for implementation. Supersedes the chat sketch where they conflict.
-Read `docs/handoff.md` (§"Architecture sketch", §"Key design decisions")
-and `docs/jsonl-schema.md` (especially §10) first; this doc assumes both.
+Design artifact for the v1 `sessions` Go package. Captures the locked-in
+API shape that landed in the package. Read `docs/jsonl-schema.md`
+(especially §10) and `CLAUDE.md` (§Architecture, §Hard rules) first; this
+doc assumes both.
 
 ## Overview
 
@@ -428,10 +428,11 @@ for ev, err := range store.Events(live.ID) {
   interface. Default: drop the noisy side-band; promote `compact_boundary`.
 - **`<synthetic>` model sentinel handling** — implementation detail of
   `AssistantMessage.Model`; callers see the literal string.
-- **Pricing / cost math** — out of scope, never in this package. See
-  handoff "No cost/pricing logic in `sessions`."
+- **Pricing / cost math** — out of scope, never in this package. Per
+  `CLAUDE.md` hard rules: no domain logic in `sessions/`.
 - **Active CLI wrapping** (kill-from-TUI, live prompt peek) — passive
-  log-reading only in v1. See handoff §"Open questions."
+  log-reading only in v1. Active wrapping is a v2 design question (see
+  GitHub issue #14 "Agent session control").
 
 ## Open questions for Jonas
 

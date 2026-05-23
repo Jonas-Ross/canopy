@@ -6,11 +6,10 @@ A personal Go TUI (bubbletea + lipgloss) that fuses a worktree-aware git command
 
 ## Read before changing anything
 
-- `docs/handoff.md` — vision, architecture, design decisions, non-goals. Source of truth. Read it before any non-trivial change; do not duplicate it here.
-- `~/.claude/plans/ok-claude-let-s-plan-agile-cocoa.md` — the approved v1 build-order plan (M0–M6). Defines milestone gates and exit criteria.
 - `docs/validation.md` — required reading before touching anything in `tui/` or `cmd/demo*`. Explains the golden-frame harness, the `canopy demo` sandbox subcommand, the script grammar, and the cascade-timing rules.
-
-If those disagree, ask Jonas — don't pick.
+- `docs/jsonl-schema.md` — required before non-trivial `sessions/` parser work. The shape of `~/.claude/projects/*/*.jsonl` as actually observed in production.
+- `docs/sessions-interface.md` — the locked-in `sessions` package API and the reasoning behind each entrypoint.
+- GitHub issue #14 — v2 tracker. Source of truth for what's planned beyond v1.
 
 ## Commands
 
@@ -20,7 +19,7 @@ If those disagree, ask Jonas — don't pick.
 | `go test ./... -race` | Run tests with the race detector (what CI gates on) |
 | `go vet ./...` | Static checks |
 | `go mod tidy` | Sync deps after touching `go.mod` |
-| `./canopy` | Run the binary (currently prints a stub) |
+| `./canopy` | Launch the TUI for the current repo |
 | `./canopy demo` | Launch the TUI against a throwaway sandbox repo |
 | `./canopy demo --script=tui/testdata/scripts/<file>` | Replay a script and capture frames — the agent-driveable loop |
 | `go test ./tui -update` | Re-bake golden frames after an intentional TUI change |
@@ -64,8 +63,10 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - `procs/` — process listing by cwd. macOS-first (sysctl `kern.proc.all` + `proc_pidinfo` + `KERN_PROCARGS2`, no cgo); Linux supported (`/proc/*/cwd`). Other platforms return `ErrUnsupported` and the aggregator soft-degrades.
 - `pr/` — `gh` CLI wrapper with a 30s cache. Single `gh pr list --json …` per repo.
 - `aggregator/` — joins all four sources into per-worktree state. Owns `CwdPrefix` correlation. Provides `Snapshot` and `Subscribe`.
-- `tui/` — bubbletea views. Operational tab in v1; analytical tab in v2.
-- `cmd/` — cobra entrypoints. Subcommand stubs added in M5 so `canopy worktree …` etc. can grow in without a rewrite.
+- `tui/` — bubbletea views. Operational tab today; analytical tab is v2.
+- `cmd/` — cobra entrypoints. `demo` is real; `worktree`, `prune`, `sessions` are intentional stubs (`stub.go` → "not yet implemented") so the surface can grow without a rewrite.
+- `internal/ansi/` — strips ANSI escapes for golden comparisons.
+- `internal/demo/` — sandbox repo + fixture setup that the `demo` subcommand drives.
 
 ## Hard rules
 
@@ -75,9 +76,9 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - Use the `gh` CLI for PR/CI state. No GitHub SDK.
 - `CwdPrefix` is the worktree↔session correlation key. Prefix match, not exact.
 - Tests are first-class. Every package gets tests. CI gates on `go test -race`.
-- No daemon for v1. Design the data layer so a daemon is a future plumbing addition, not a redesign.
+- No daemon yet. Design the data layer so a daemon is a future plumbing addition, not a redesign — this is an open v2 question.
 - macOS-first; Linux supported. Other platforms degrade gracefully — never crash on missing OS support.
-- Cobra from day one, even when v1 is single-command. Subcommand surface should accommodate `canopy worktree`, `canopy sessions`, `canopy prune` later.
+- Cobra-backed CLI. Even single-purpose subcommands go through the cobra surface so `canopy worktree`, `canopy sessions`, `canopy prune` etc. can grow alongside.
 - Anthropic's JSONL schema is theirs to change. Normalize into a stable internal `Event` type so there's one place to fix when it shifts.
 
 ## How to work with Jonas
@@ -87,24 +88,17 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - Slow is smooth, smooth is fast. Design conversation first, implementation second.
 - If domain logic starts leaking into `sessions/`, say so.
 - Stay opinionated about small/understandable code over large libraries.
-- Aesthetics are a first-class feature, not polish at the end — but only once the milestone gate says it's time.
+- Aesthetics are a first-class feature, not polish at the end.
 
 ## Issue scoping
 
-- When implementing a GitHub issue, **ship the full scope of the issue**. Do not silently carve off "later slices" or invent follow-up milestones (e.g. "M4.5") to make a PR feel smaller. If the work is genuinely too large for one PR, surface the split explicitly to Jonas before writing the spec — don't decide unilaterally.
+- When implementing a GitHub issue, **ship the full scope of the issue**. Do not silently carve off "later slices" or invent follow-up phases to make a PR feel smaller. If the work is genuinely too large for one PR, surface the split explicitly to Jonas before writing the spec — don't decide unilaterally.
 - "Pause for demo" or similar markers in an issue body are **mid-flight checkpoints** for Jonas to look at the work and steer, not PR cut-points. Continue to the issue's full acceptance criteria after the checkpoint unless he tells you otherwise.
 - Acceptance criteria like "would I open `canopy` tomorrow morning?" or "self-demo" are real bars, not flavor text. If shipped scope doesn't meet them, the issue is not done.
 - Don't prime the PM sub-agent with "user prefers small PRs" — that's a value judgment that biases scope. Let the issue dictate scope; let Jonas dictate splits.
 
-## Starting a session
-
-1. Skim `docs/handoff.md` if anything is unclear about intent.
-2. Open the plan (`~/.claude/plans/ok-claude-let-s-plan-agile-cocoa.md`) and identify the current milestone (see Status below).
-3. Confirm what's in scope for that milestone. Ask before deviating.
-4. Surface design questions before writing code.
-
 ## Status
 
-v0.4. Operational TUI shipped in PR #15 (with follow-up polish in #28–30): `sessions`, `git`, `procs`, `pr`, `aggregator`, `tui`, and `cmd/demo` all in place. The validation loop (`go test ./tui` goldens + `canopy demo` scripted replays + optional `--capture-png` via `freeze`) is the merge gate for further TUI work — see `docs/validation.md`. Active milestone: **M4 → M5** transition.
+v1 shipped and in daily use. All packages — `sessions`, `git`, `procs`, `pr`, `aggregator`, `tui`, and `cmd/demo` — in place. The validation loop (`go test ./tui` goldens + `canopy demo` scripted replays + optional `--capture-png` via `freeze`) is the merge gate for TUI work; see `docs/validation.md`.
 
-Build order: M0 → M1 (`sessions`) → M2 (`git`, `procs`, `pr`, parallelizable) → M3 (`aggregator`) → M4 (TUI operational view, **self-validating via the demo loop**) → M5 (subcommand stubs) → M6 (verification). Critical path is M0 → M1 → M3 → M4.
+v2 work is tracked in GitHub issue #14 (analytical/forensics tab, cross-linking, activity feed, upstream-collision detection, stale-worktree triage, deeper PR integration, stack-branch awareness, port-collision warnings, agent session control, notifications). Daemon mode is the open architectural question that warps everything else.

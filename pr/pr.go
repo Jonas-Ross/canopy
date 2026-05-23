@@ -152,11 +152,10 @@ type ghCheckRoll struct {
 	Conclusion string `json:"conclusion"`
 }
 
-// List runs the single canonical `gh pr list --json …` invocation
-// (documented in docs/handoff.md §"PR integration"), parses the
-// result, and returns one PR per row. The shellout runs with cwd =
-// repoRoot, which lets gh pick up the right remote without an
-// explicit -R flag.
+// List runs the single canonical `gh pr list --json …` invocation,
+// parses the result, and returns one PR per row. The shellout runs
+// with cwd = repoRoot, which lets gh pick up the right remote without
+// an explicit -R flag.
 //
 // Returns ErrNoGH when gh isn't on PATH, ErrNotAuthed when gh
 // reports an auth failure on stderr, and a wrapped error for any
