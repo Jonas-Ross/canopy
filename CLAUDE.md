@@ -1,6 +1,6 @@
 # Canopy
 
-A personal Go TUI (bubbletea + lipgloss) that fuses a worktree-aware git command center with Claude Code session forensics, for Jonas.
+A personal Go TUI (bubbletea + lipgloss) that fuses a worktree-aware git command center with Claude Code session forensics.
 
 `AGENTS.md` is a symlink to this file — agents that look for either will find the same content.
 
@@ -66,7 +66,7 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - `procs/` — process listing by cwd. macOS-first (sysctl `kern.proc.all` + `proc_pidinfo` + `KERN_PROCARGS2`, no cgo); Linux supported (`/proc/*/cwd`). Other platforms return `ErrUnsupported` and the aggregator soft-degrades.
 - `pr/` — `gh` CLI wrapper with a 30s cache. Single `gh pr list --json …` per repo.
 - `aggregator/` — joins all four sources into per-worktree state. Owns `CwdPrefix` correlation. Provides `Snapshot` and `Subscribe`.
-- `tui/` — bubbletea views. Operational tab today; analytical tab is v2. `prettyModelName` (in `forensics_tools.go`) is the canonical display helper for model identifiers (`claude-opus-4-7` → `Opus 4.7`, drops date suffixes) — use it wherever model names appear in user-facing text.
+- `tui/` — bubbletea views. Two top-level tabs: operational (worktree command center) and forensics (spend / sessions / tools / worktrees sub-views, backed by `analytics/`). `prettyModelName` (in `forensics_tools.go`) is the canonical display helper for model identifiers (`claude-opus-4-7` → `Opus 4.7`, drops date suffixes) — use it wherever model names appear in user-facing text.
 - `cmd/` — cobra entrypoints. `demo` is real; `worktree`, `prune`, `sessions` are intentional stubs (`stub.go` → "not yet implemented") so the surface can grow without a rewrite.
 - `internal/ansi/` — strips ANSI escapes for golden comparisons.
 - `internal/demo/` — sandbox repo + fixture setup that the `demo` subcommand drives.
@@ -79,12 +79,12 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - Use the `gh` CLI for PR/CI state. No GitHub SDK.
 - `CwdPrefix` is the worktree↔session correlation key. Prefix match, not exact.
 - Tests are first-class. Every package gets tests. CI gates on `go test -race`.
-- No daemon yet. Design the data layer so a daemon is a future plumbing addition, not a redesign — this is an open v2 question.
+- No daemon (decided for v2 — see `docs/daemon-decision.md`). Keep the data layer shaped so a daemon could be added later as plumbing, not a redesign.
 - macOS-first; Linux supported. Other platforms degrade gracefully — never crash on missing OS support.
 - Cobra-backed CLI. Even single-purpose subcommands go through the cobra surface so `canopy worktree`, `canopy sessions`, `canopy prune` etc. can grow alongside.
 - Anthropic's JSONL schema is theirs to change. Normalize into a stable internal `Event` type so there's one place to fix when it shifts.
 
-## How to work with Jonas
+## How to work
 
 - Pressure-test designs before code. Flag inconsistencies, missing edge cases, things he'll regret.
 - Do not run ahead. No implementing multiple packages before you've talked shape.
@@ -92,17 +92,70 @@ Layered, with `sessions` as a pure data-access library at the bottom and `tui` o
 - If domain logic starts leaking into `sessions/`, say so.
 - Stay opinionated about small/understandable code over large libraries.
 - Aesthetics are a first-class feature, not polish at the end.
-- Do not use the `superpowers` plugin (brainstorming / writing-plans / writing-specs / subagent-driven-development) on this project. The overhead doesn't fit how Jonas works here — go straight from conversation to implementation.
+- Do not use the `superpowers` plugin (brainstorming / writing-plans / writing-specs / subagent-driven-development) on this project.
 
 ## Issue scoping
 
-- When implementing a GitHub issue, **ship the full scope of the issue**. Do not silently carve off "later slices" or invent follow-up phases to make a PR feel smaller. If the work is genuinely too large for one PR, surface the split explicitly to Jonas before writing the spec — don't decide unilaterally.
-- "Pause for demo" or similar markers in an issue body are **mid-flight checkpoints** for Jonas to look at the work and steer, not PR cut-points. Continue to the issue's full acceptance criteria after the checkpoint unless he tells you otherwise.
+- When implementing a GitHub issue, **ship the full scope of the issue**. Do not silently carve off "later slices" or invent follow-up phases to make a PR feel smaller. If the work is genuinely too large for one PR, surface the split explicitly before writing the spec — don't decide unilaterally.
+- "Pause for demo" or similar markers in an issue body are **mid-flight checkpoints** to look at the work and steer, not PR cut-points. Continue to the issue's full acceptance criteria after the checkpoint unless told otherwise.
 - Acceptance criteria like "would I open `canopy` tomorrow morning?" or "self-demo" are real bars, not flavor text. If shipped scope doesn't meet them, the issue is not done.
-- Don't prime the PM sub-agent with "user prefers small PRs" — that's a value judgment that biases scope. Let the issue dictate scope; let Jonas dictate splits.
+- Don't prime the PM sub-agent with "user prefers small PRs" — that's a value judgment that biases scope. Let the issue dictate scope; let the user dictate splits.
 
 ## Status
 
 v1 shipped and in daily use. All packages — `sessions`, `git`, `procs`, `pr`, `aggregator`, `tui`, and `cmd/demo` — in place. The validation loop (`go test ./tui` goldens + `canopy demo` scripted replays + optional `--capture-png` via `freeze`) is the merge gate for TUI work; see `docs/validation.md`.
 
 v2 in progress. The analytical/forensics tab (issue #55) landed as the first v2 feature: second top-level tab, four sub-views (spend / sessions / tools / worktrees), backed by the new `analytics/` package over the existing `sessions` data layer. Remaining v2 work tracked in #14: cross-linking operational ↔ analytical, activity feed, upstream-collision detection, stale-worktree triage, deeper PR integration, stack-branch awareness, port-collision warnings, agent session control, notifications. Daemon mode is decided (no daemon for v2 — see `docs/daemon-decision.md`).
+
+## Code Search
+
+Use `semble search` to find code by describing what it does or naming a symbol/identifier, instead of grep:
+
+​```bash
+semble search "authentication flow" ./my-project
+semble search "save_pretrained" ./my-project
+semble search "save model to disk" ./my-project --top-k 10
+​```
+
+If you anticipate doing more than one search, use `semble index` to create an index.
+
+​```bash
+semble index ./my-project -o my_index
+​```
+
+You can then reuse this index later on:
+
+​```bash
+semble search "save_pretrained" --index my_index
+​```
+
+An index is not automatically updated, so if the code changes significantly, reindex. If you notice stale results while resolving searches to files, reindex.
+
+Use `--content docs` to search documentation and prose, `--content config` for config files (yaml, toml, etc.), or `--content all` to search code, docs, and config:
+
+​```bash
+semble search "deployment guide" ./my-project --content docs
+semble search "database host port" ./my-project --content config
+semble search "authentication" ./my-project --content all
+​```
+
+Use `semble find-related` to discover code similar to a known location (pass `file_path` and `line` from a prior search result):
+
+​```bash
+semble find-related src/auth.py 42 ./my-project
+​```
+
+Like search, `find-related` also accepts an `--index` argument.
+
+`path` defaults to the current directory when omitted; git URLs are accepted.
+
+If `semble` is not on `$PATH`, use `uvx --from "semble[mcp]" semble` in its place.
+
+### Workflow
+
+1. Index the repo using `semble index -o cached_index`.
+2. Start with `semble search` to find relevant chunks. Pass the index to achieve results faster.
+3. Use `--content docs` for documentation, `--content config` for config files, or `--content all` for everything.
+4. Inspect full files only when the returned chunk does not give enough context.
+5. Optionally use `semble find-related` with a promising result's `file_path` and `line` to discover related implementations.
+6. Use grep only when you need exhaustive literal matches or quick confirmation of an exact string.
