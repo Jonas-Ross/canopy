@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jonasross/canopy/analytics"
@@ -52,7 +53,6 @@ func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string
 		}
 
 		sessCount := sessionCountByModel[model]
-		// Header: bold cyan model name, dim "N sessions · M calls" subtitle.
 		sb.WriteString("  ")
 		sb.WriteString(tabActive.Render(model))
 		sb.WriteString(dimStyle.Render(fmt.Sprintf("    %d sessions · %s calls",
@@ -100,7 +100,6 @@ func renderToolRow(name string, count, totalCalls int) string {
 	sb.WriteString("    ") // 4-sp row indent
 	sb.WriteString(tagStyle.Render(fmt.Sprintf("%-4s", tag)))
 	sb.WriteString("  ")
-	// Name column: foreground text, left-aligned, padded to nameColW.
 	sb.WriteString(fmt.Sprintf("%-*s", nameColW, display))
 	sb.WriteString("  ")
 	sb.WriteString(fill)
@@ -255,10 +254,7 @@ func proportionalBar(count, totalCalls, cellWidth int) (fill, track string) {
 	if raw.Len() == 0 {
 		raw.WriteRune('▏')
 	}
-	fillVisualW := 0
-	for range raw.String() {
-		fillVisualW++
-	}
+	fillVisualW := utf8.RuneCountInString(raw.String())
 	if fillVisualW > cellWidth {
 		// count > totalCalls shouldn't happen but we promise the fill+track
 		// width invariant — clamp both the visible string and the measurement
