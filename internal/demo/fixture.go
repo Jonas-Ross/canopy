@@ -381,6 +381,43 @@ func (f *Fixture) writeHistoricalSessions(now time.Time) error {
 			tools:      map[string]int{"Read": 3, "Bash": 2, "Grep": 4},
 			input:      20000, output: 5000, cacheRead: 11000, cacheCrea: 1600,
 		},
+		// Day -2: feat/dashboard sonnet with web research traffic — exercises
+		// the web (WebFetch/WebSearch) category in the tools view.
+		{
+			projectDir: "canopy-hist-dashboard-04",
+			id:         "f0000015-0000-0000-0000-000000000015",
+			cwd:        f.WorktreePath(BranchDashboard),
+			model:      "claude-sonnet-4-6",
+			daysAgo:    2,
+			tools:      map[string]int{"WebFetch": 8, "WebSearch": 7, "Read": 4, "Edit": 2},
+			input:      26000, output: 6500, cacheRead: 14000, cacheCrea: 1900,
+		},
+		// Day -3: feat/auth opus session that drives an MCP server — exercises
+		// the mcp category and the multi-segment-server simplification path.
+		{
+			projectDir: "canopy-hist-auth-07",
+			id:         "f0000016-0000-0000-0000-000000000016",
+			cwd:        f.WorktreePath(BranchAuth),
+			model:      "claude-opus-4-7",
+			daysAgo:    3,
+			tools: map[string]int{
+				"mcp__plugin_github_github__list_issues":         16,
+				"mcp__plugin_github_github__create_pull_request": 8,
+				"Read": 5, "Bash": 4,
+			},
+			input: 38000, output: 8000, cacheRead: 22000, cacheCrea: 2700,
+		},
+		// Day -4: chore/deps opus session that dispatches subagents and uses
+		// SendMessage — exercises the task category.
+		{
+			projectDir: "canopy-hist-deps-03",
+			id:         "f0000017-0000-0000-0000-000000000017",
+			cwd:        f.WorktreePath(BranchDeps),
+			model:      "claude-opus-4-7",
+			daysAgo:    4,
+			tools:      map[string]int{"SendMessage": 18, "Task": 16, "TaskUpdate": 10, "Read": 4, "Bash": 2},
+			input:      33000, output: 7200, cacheRead: 18000, cacheCrea: 2300,
+		},
 	}
 	for _, spec := range specs {
 		mtime := now.Add(-time.Duration(spec.daysAgo) * 24 * time.Hour)
