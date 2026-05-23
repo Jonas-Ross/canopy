@@ -1,7 +1,9 @@
 package analytics
 
 import (
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jonasross/canopy/sessions"
@@ -51,8 +53,9 @@ func pathHasPrefix(p, prefix string) bool {
 	if p == prefix {
 		return true
 	}
-	if len(p) <= len(prefix) {
+	if !strings.HasPrefix(p, prefix) {
 		return false
 	}
-	return p[:len(prefix)] == prefix && p[len(prefix)] == '/'
+	rest := p[len(prefix):]
+	return len(rest) > 0 && rest[0] == filepath.Separator
 }

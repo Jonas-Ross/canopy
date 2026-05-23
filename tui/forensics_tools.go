@@ -8,8 +8,10 @@ import (
 	"github.com/jonasross/canopy/analytics"
 )
 
-const toolBarWidth = 20 // max cells for bar in tools view
-const topToolsPerModel = 5 // show top N tools before "other"
+const (
+	toolBarWidth    = 20 // max cells for bar in tools view
+	topToolsPerModel = 5 // show top N tools before "other"
+)
 
 // renderToolsView renders the tools sub-view: per-model section header,
 // top-5 tool bars, and an "other" row collapsing the remainder.
