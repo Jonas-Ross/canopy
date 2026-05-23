@@ -91,7 +91,7 @@ func TestFormatToolName(t *testing.T) {
 		{"mcp action truncated", "mcp__plugin_github_github__create_pull_request", 20, "github/create_pu…est"},
 
 		// MCP: server alone equals or exceeds maxWidth — action becomes "…".
-		{"mcp server too long", "mcp__plugin_verylongservername_x__do_thing", 12, "verylongservername_x/…"},
+		{"mcp server too long", "mcp__superlongservername__do_thing", 12, "superlongservername/…"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
