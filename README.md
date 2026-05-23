@@ -4,7 +4,7 @@
 
 Personal TUI built in Go (bubbletea + lipgloss) that fuses a worktree-aware git command center with Claude Code session forensics.
 
-The repo is at the scaffolding stage. The full vision and design context live in [`docs/handoff.md`](docs/handoff.md).
+v1 is shipped and in daily use. v2 (analytical tab, cross-linking, activity feed, and more) is tracked in [#14](https://github.com/Jonas-Ross/canopy/issues/14).
 
 ## Build
 
@@ -26,4 +26,4 @@ CI (`.github/workflows/ci.yml`) runs `go vet`, `go build`, and `go test -race` o
 
 ## Status
 
-M4 slices 1–3 landed: bubbletea operational view with worktree list, live-agent indicator (●), branch/dirty/ahead-behind/age columns, and incremental filter. Slices 4–8 (PR column, procs column, detail pane, ops keybinds, lipgloss polish) deferred to M4.5.
+v1 shipped and in daily use. Operational TUI with worktree list, live-agent indicator (●), branch/dirty/ahead-behind/age columns, PR and procs columns, detail pane, ops keybinds, and incremental filter. v2 planning is happening in [#14](https://github.com/Jonas-Ross/canopy/issues/14).

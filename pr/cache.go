@@ -47,8 +47,8 @@ type cacheEntry struct {
 //   - Gets after TTL refresh synchronously. On success, the cell is
 //     updated and stale=false. On failure with a previous successful
 //     result, the cached payload is returned with stale=true and a
-//     nil error (the "stale-on-error" path documented in
-//     docs/handoff.md §"PR integration — Failure modes").
+//     nil error (the "stale-on-error" path: degrade visually, don't
+//     fail the read).
 //   - Gets after TTL with no previous successful result propagate the
 //     error.
 //   - Invalidate forces the next Get to refresh regardless of TTL.
@@ -63,7 +63,7 @@ type Cache struct {
 
 // NewCache constructs a Cache with the given TTL. TTL <= 0 is
 // allowed and means "always refresh" (entries are immediately stale);
-// production code should pass 30s per the handoff.
+// production code should pass 30s.
 func NewCache(ttl time.Duration) *Cache {
 	return &Cache{
 		ttl:     ttl,
