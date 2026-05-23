@@ -12,11 +12,16 @@ import (
 // PerWorktree groups sessions by their deepest cwd (the last entry in
 // sess.Cwds after Hydrate). repoRoot, when non-empty, restricts results
 // to sessions whose cwd is equal to or nested under repoRoot. Pass "" to
-// include all sessions in the store. since filters by UpdatedAt.
+// include all sessions in the store. since filters by UpdatedAt — a
+// long-running session that started before the window but was active
+// within it is included.
 func PerWorktree(store *sessions.Store, repoRoot string, since time.Time) ([]WorktreeSummary, error) {
 	agg := map[string]*WorktreeSummary{}
 
-	for sess := range store.Query(sessions.Query{Since: since}) {
+	for sess := range store.Sessions() {
+		if !since.IsZero() && sess.UpdatedAt.Before(since) {
+			continue
+		}
 		if err := store.Hydrate(sess); err != nil {
 			return nil, err
 		}

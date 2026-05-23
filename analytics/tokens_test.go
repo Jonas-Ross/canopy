@@ -39,6 +39,28 @@ func TestTokensByDay_groupsByDayAndModel(t *testing.T) {
 	}
 }
 
+func TestTokensByDay_longRunningSessionIncludedByUpdatedAt(t *testing.T) {
+	// A session that started 35 days ago but was last active 2 days ago
+	// must appear in a 30-day window — the filter is UpdatedAt, not
+	// StartedAt, so we don't lose sessions that span the boundary.
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	startedLongAgo := now.AddDate(0, 0, -35)
+	updatedRecently := now.AddDate(0, 0, -2)
+	store := newTestStore(t, []sessionSpec{
+		{id: "long", model: "claude-opus-4-7", started: startedLongAgo, updated: updatedRecently,
+			usage: usage{Input: 1234}},
+	})
+
+	got, err := TokensByDay(store, now.AddDate(0, 0, -30), now, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := updatedRecently.UTC().Format("2006-01-02")
+	if bucketsByDate(got)[key].Tokens.Input != 1234 {
+		t.Errorf("long-running session should appear under its UpdatedAt day %q, got buckets %+v", key, got)
+	}
+}
+
 func TestTokensByDay_filtersByModel(t *testing.T) {
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	store := newTestStore(t, []sessionSpec{
