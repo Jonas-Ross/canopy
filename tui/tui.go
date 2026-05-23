@@ -29,9 +29,20 @@ type UpdateMsg aggregator.Update
 // breathing rhythm; faster feels restless, slower feels sluggish.
 const blinkInterval = 1 * time.Second
 
+// tab is the top-level tab enum. tabOperational is the zero value so an
+// uninitialized Model defaults to the operational view.
+type tab int
+
+const (
+	tabOperational tab = iota
+	tabForensics
+)
+
 // Model is the root bubbletea model. Update is pure: I/O lives in Run.
 type Model struct {
 	refresher Refresher
+
+	tab tab
 
 	// runCtx is the bubbletea-level lifecycle ctx, threaded through to the
 	// op cmd factories (e.g. removeWorktreeCmd) so that quit-mid-operation
@@ -272,8 +283,6 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeFiltering
 			m.filterInput.SetValue(m.filterStr)
 			m.filterInput.Focus()
-		case keyForensics:
-			m.notice = dimStyle.Render(footerForensics)
 		case keyNew:
 			out, cmd := m.startNewWorktree()
 			return out, cmd
@@ -297,7 +306,11 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.moveFocus(-1)
 
 	case msg.Type == tea.KeyTab:
-		m.notice = dimStyle.Render(footerTab)
+		if m.tab == tabOperational {
+			m.tab = tabForensics
+		} else {
+			m.tab = tabOperational
+		}
 
 	case msg.Type == tea.KeyEsc:
 		m.filterStr = ""
@@ -493,6 +506,15 @@ func wrappedRows(s string, width int) int {
 }
 
 func (m Model) View() string {
+	switch m.tab {
+	case tabForensics:
+		return m.renderForensicsView()
+	default:
+		return m.renderOperationalView()
+	}
+}
+
+func (m Model) renderOperationalView() string {
 	now := m.now()
 	width := m.width
 	if width <= 0 {
@@ -556,7 +578,15 @@ func (m Model) renderTitleBar(width int) string {
 	if m.repo != "" {
 		left += " " + ruleStyle.Render("·") + " " + repoStyle.Render(m.repo)
 	}
-	right := tabActive.Render("ops") + " " + tabFaded.Render("·") + " " + tabFaded.Render("forensics") + " "
+
+	opsStyle := tabFaded
+	forensicsStyle := tabFaded
+	if m.tab == tabForensics {
+		forensicsStyle = tabActive
+	} else {
+		opsStyle = tabActive
+	}
+	right := opsStyle.Render("ops") + " " + tabFaded.Render("·") + " " + forensicsStyle.Render("forensics") + " "
 
 	leftW := lipgloss.Width(left)
 	rightW := lipgloss.Width(right)

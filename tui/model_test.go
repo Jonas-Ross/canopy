@@ -304,12 +304,11 @@ func TestModelView_FilterCaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestModelView_TabKeyNoOp verifies pressing 'tab' does not crash and the
-// worktree list remains in the view.
+// TestModelView_TabKeySwitchesToForensics verifies pressing 'tab' switches to
+// the forensics view and a second Tab returns to ops.
 //
-// Acceptance criterion: "Pressing tab does NOT crash and does NOT switch
-// contents."
-func TestModelView_TabKeyNoOp(t *testing.T) {
+// Acceptance criterion: "Tab cycles ops → forensics → ops without crashing."
+func TestModelView_TabKeySwitchesToForensics(t *testing.T) {
 	m := tui.NewModel(&fakeRefresher{})
 
 	m = applyUpdate(m, aggregator.Update{
@@ -319,31 +318,34 @@ func TestModelView_TabKeyNoOp(t *testing.T) {
 		},
 	})
 
-	viewBefore := m.View()
-
+	// First Tab: switches to forensics. The worktree list should not be shown.
 	m, _ = applySpecialKey(m, tea.KeyTab)
-
-	viewAfter := m.View()
-
-	// The branch should still appear after tab.
-	if !strings.Contains(viewAfter, "main") {
-		t.Errorf("View missing branch 'main' after tab; view=%q", viewAfter)
+	viewForensics := stripANSI(m.View())
+	if strings.Contains(viewForensics, "main") {
+		t.Errorf("forensics view contains operational branch 'main'; view=%q", viewForensics)
 	}
-	_ = viewBefore // assigning avoids unused var; the real check is after
+	lowerForensics := strings.ToLower(viewForensics)
+	if !strings.Contains(lowerForensics, "forensics") {
+		t.Errorf("forensics view missing 'forensics' text; view=%q", viewForensics)
+	}
+
+	// Second Tab: returns to ops. The worktree list should be shown again.
+	m, _ = applySpecialKey(m, tea.KeyTab)
+	viewOps := m.View()
+	if !strings.Contains(viewOps, "main") {
+		t.Errorf("ops view after two Tabs missing branch 'main'; view=%q", viewOps)
+	}
 }
 
-// TestModelView_FKeyFooter verifies pressing 'f' does not crash and shows
-// a "coming soon" / forensics message in the footer.
-//
-// Acceptance criterion: "Pressing f does NOT crash and does NOT navigate;
-// the footer shows 'v2: forensics — coming soon' or equivalent."
-func TestModelView_FKeyFooter(t *testing.T) {
+// TestModelView_FKeyDoesNotCrash verifies pressing 'f' does not crash.
+// The 'f' key is now unbound (the forensics shortcut was removed in favour
+// of Tab cycling the top-level tab).
+func TestModelView_FKeyDoesNotCrash(t *testing.T) {
 	m := tui.NewModel(&fakeRefresher{})
 	m, _ = applyKey(m, 'f')
-	view := m.View()
-	lower := strings.ToLower(view)
-	if !strings.Contains(lower, "forensics") && !strings.Contains(lower, "coming soon") && !strings.Contains(lower, "v2") {
-		t.Errorf("View after pressing f does not mention forensics/v2/coming soon; view=%q", view)
+	// Must not panic; a non-empty view is sufficient.
+	if view := m.View(); view == "" {
+		t.Error("View returned empty string after pressing f")
 	}
 }
 

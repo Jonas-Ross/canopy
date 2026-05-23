@@ -153,6 +153,26 @@ func NewFormBaseValueOf(m tea.Model) string {
 	return ""
 }
 
+// Tab seams — expose the unexported tab type and constants so tui_test can
+// drive and assert the active tab without reaching into unexported fields.
+
+// Tab is the exported alias for the unexported tab type.
+type Tab = tab
+
+const (
+	TabOperational = tabOperational
+	TabForensics   = tabForensics
+)
+
+// ActiveTab returns the active tab of a Model. Returns TabOperational on a
+// type-assertion miss.
+func ActiveTab(m tea.Model) Tab {
+	if mm, ok := m.(Model); ok {
+		return mm.tab
+	}
+	return TabOperational
+}
+
 // BlinkPhaseOf returns the current phase of the live-indicator blink:
 // true = on (bright), false = off (dim). Returns false on a type-assertion
 // miss.
