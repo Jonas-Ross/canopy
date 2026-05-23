@@ -64,3 +64,41 @@ func TestCategorizeTool(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatToolName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxWidth int
+		want     string
+	}{
+		// Non-MCP names pass through.
+		{"Read passthrough", "Read", 20, "Read"},
+		{"Bash passthrough", "Bash", 20, "Bash"},
+		{"NotebookEdit passthrough", "NotebookEdit", 20, "NotebookEdit"},
+		{"empty passthrough", "", 20, ""},
+
+		// MCP: simple two-segment server, fits.
+		{"mcp simple", "mcp__semble__search", 20, "semble/search"},
+		{"mcp wiki", "mcp__wiki__write_page", 20, "wiki/write_page"},
+		{"mcp ide", "mcp__ide__getDiagnostics", 20, "ide/getDiagnostics"},
+
+		// MCP: multi-segment server collapses to its last segment.
+		{"mcp plugin github short", "mcp__plugin_github_github__list_issues", 20, "github/list_issues"},
+		{"mcp plugin context7", "mcp__plugin_context7_context7__resolve-library-id", 30, "context7/resolve-library-id"},
+
+		// MCP: result longer than maxWidth — middle-truncate the action.
+		{"mcp action truncated", "mcp__plugin_github_github__create_pull_request", 20, "github/create_pu…est"},
+
+		// MCP: server alone equals or exceeds maxWidth — action becomes "…".
+		{"mcp server too long", "mcp__plugin_verylongservername_x__do_thing", 12, "verylongservername_x/…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatToolName(tt.input, tt.maxWidth)
+			if got != tt.want {
+				t.Errorf("formatToolName(%q, %d) = %q, want %q", tt.input, tt.maxWidth, got, tt.want)
+			}
+		})
+	}
+}

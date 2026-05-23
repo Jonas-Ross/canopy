@@ -164,6 +164,94 @@ func categorizeTool(name string) (tag string, style lipgloss.Style) {
 	return "·", toolTagDimStyle
 }
 
+// formatToolName returns the display form of a tool name for the
+// forensics tools view.
+//
+// Non-MCP names pass through unchanged.
+//
+// MCP names (mcp__<server>__<action>) are simplified:
+//
+//   - The mcp__ prefix is stripped.
+//   - The server portion is split on "_" and reduced to its LAST
+//     segment. This collapses wrapper-noise like "plugin_github_github"
+//     to "github" while leaving single-segment servers ("semble",
+//     "wiki") untouched.
+//   - The action segment is kept intact.
+//   - The two parts are joined with "/".
+//
+// If the joined form exceeds maxWidth visual cells, the action portion
+// is middle-truncated with "…" while the server portion is preserved.
+// In the edge case where the simplified server alone is >= maxWidth,
+// the server is kept and the action becomes "…" (per spec — the server
+// is never truncated).
+//
+// maxWidth <= 0 disables truncation.
+func formatToolName(name string, maxWidth int) string {
+	if !strings.HasPrefix(name, "mcp__") {
+		return name
+	}
+	rest := strings.TrimPrefix(name, "mcp__")
+	idx := strings.Index(rest, "__")
+	var server, action string
+	if idx < 0 {
+		server, action = rest, ""
+	} else {
+		server, action = rest[:idx], rest[idx+2:]
+	}
+	if after, ok := strings.CutPrefix(server, "plugin_"); ok {
+		// The plugin convention uses "plugin_<name>_<name>" where the name
+		// is duplicated (e.g. "plugin_github_github" → "github"). When the
+		// first and last underscore-delimited segments match, collapse to
+		// that one name. Otherwise keep the whole post-prefix string.
+		if i := strings.Index(after, "_"); i >= 0 {
+			first, rest2 := after[:i], after[i+1:]
+			if j := strings.LastIndex(rest2, "_"); j >= 0 {
+				// More than two segments — check if last equals first.
+				last := rest2[j+1:]
+				if last == first {
+					server = first
+				} else {
+					server = after
+				}
+			} else {
+				// Exactly two segments: first and rest2.
+				if rest2 == first {
+					server = first
+				} else {
+					server = after
+				}
+			}
+		} else {
+			server = after
+		}
+	}
+	if action == "" {
+		return server
+	}
+	out := server + "/" + action
+	if maxWidth <= 0 || len(out) <= maxWidth {
+		return out
+	}
+	prefix := server + "/"
+	if len(prefix) >= maxWidth {
+		return prefix + "…"
+	}
+	budget := maxWidth - len(prefix) - 1 // -1 for "…"
+	if budget < 1 {
+		return prefix + "…"
+	}
+	head := (budget * 3) / 4
+	tail := budget - head
+	if head < 1 {
+		head = 1
+		tail = budget - 1
+	}
+	if tail < 1 {
+		tail = 0
+	}
+	return prefix + action[:head] + "…" + action[len(action)-tail:]
+}
+
 // formatWithCommas formats an integer with comma thousands separators.
 func formatWithCommas(n int) string {
 	s := fmt.Sprintf("%d", n)
