@@ -78,6 +78,9 @@ func TestFormatToolName(t *testing.T) {
 		{"NotebookEdit passthrough", "NotebookEdit", 20, "NotebookEdit"},
 		{"empty passthrough", "", 20, ""},
 
+		// maxWidth <= 0 disables truncation per docstring.
+		{"maxWidth zero disables truncation", "mcp__plugin_github_github__create_pull_request", 0, "github/create_pull_request"},
+
 		// MCP: simple two-segment server, fits.
 		{"mcp simple", "mcp__semble__search", 20, "semble/search"},
 		{"mcp wiki", "mcp__wiki__write_page", 20, "wiki/write_page"},

@@ -208,6 +208,10 @@ func formatToolName(name string, maxWidth int) string {
 	if maxWidth <= 0 || len(out) <= maxWidth {
 		return out
 	}
+	// len() returns bytes; this is correct for ASCII tool names (every
+	// MCP tool name observed in production is an ASCII identifier).
+	// The single "…" we add later is 1 visual cell but 3 bytes, which
+	// the budget subtraction below accounts for.
 	prefix := server + "/"
 	if len(prefix) >= maxWidth {
 		return prefix + "…"
