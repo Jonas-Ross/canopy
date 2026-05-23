@@ -30,11 +30,9 @@ func formatSessionTime(t, now time.Time) string {
 	return fmt.Sprintf("%s %02d", t.UTC().Format("Mon"), t.UTC().Day())
 }
 
-// formatSessionModel turns a model identifier into its display form
-// for the sessions table. Uses prettyModelName (claude-opus-4-7 →
-// Opus 4.7), then truncates with ellipsis if it still exceeds max
-// runes. Empty input renders as an em-dash placeholder so the column
-// stays honest about missing data.
+// formatSessionModel renders a model identifier via prettyModelName,
+// truncated to max runes. An empty model becomes an em-dash so the
+// column doesn't silently break the row.
 func formatSessionModel(model string, max int) string {
 	if model == "" {
 		return truncateWithEllipsis("—", max)
@@ -92,17 +90,16 @@ func renderSessionsView(sessions []analytics.SessionSummary, now time.Time, widt
 
 	const (
 		startedW  = 8  // "HH:MM" or "Mon DD"
-		modelW    = 14 // "sonnet-4-6" fits; "opus-4-7" fits
-		worktreeW = 18 // basename, truncated
+		modelW    = 14 // "Sonnet 4.6" / "Opus 4.7" fit with margin
+		worktreeW = 18
 		durationW = 10 // "1h 02m"
-		promptsW  = 8  // "prompts" header
-		toolsW    = 7  // "tools" header
+		promptsW  = 8
+		toolsW    = 7
 	)
 
 	var sb strings.Builder
 	sb.Grow(512)
 
-	// Header row.
 	sb.WriteString("  ")
 	sb.WriteString(dimStyle.Render("  ")) // live-dot column placeholder
 	sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", startedW, "started")))

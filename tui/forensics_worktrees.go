@@ -32,8 +32,6 @@ func renderWorktreesView(worktrees []analytics.WorktreeSummary, now time.Time, w
 	var sb strings.Builder
 	sb.Grow(512)
 
-	// Header — labels dim, indented to align with the data rows (the
-	// marker column eats a 2-char slot whether it shows ● or blank).
 	sb.WriteString(strings.Repeat(" ", markerColW))
 	sb.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", worktreeColW, "worktree")))
 	sb.WriteString("  ")
@@ -53,8 +51,6 @@ func renderWorktreesView(worktrees []analytics.WorktreeSummary, now time.Time, w
 		last := FormatRelativeTime(wt.LastSeen, now)
 		age := now.Sub(wt.LastSeen)
 
-		// Live marker: ● (green) if active in the last LiveWindow, else
-		// blank space to preserve column alignment.
 		if !wt.LastSeen.IsZero() && age < liveWindowDuration {
 			sb.WriteString(liveStyle.Render("●"))
 			sb.WriteByte(' ')
@@ -74,7 +70,6 @@ func renderWorktreesView(worktrees []analytics.WorktreeSummary, now time.Time, w
 		totTime += wt.TotalTime
 	}
 
-	// Footer rule + totals.
 	ruleLen := markerColW + worktreeColW + sessionsColW + timeColW + lastSeenColW + 8
 	sb.WriteString("  ")
 	sb.WriteString(ruleStyle.Render(strings.Repeat("─", ruleLen)))
@@ -90,9 +85,9 @@ func renderWorktreesView(worktrees []analytics.WorktreeSummary, now time.Time, w
 	return sb.String()
 }
 
-// lastSeenStyle picks a recency-tinted style for the last-seen column.
-// Green for live/recent, foreground for today, yellow for this week, dim
-// for older. A zero LastSeen falls through to dim ("never seen").
+// lastSeenStyle picks a recency-tinted style for the last-seen column:
+// green for live/recent, foreground for today, yellow for this week,
+// dim for older or never-seen.
 func lastSeenStyle(age time.Duration, lastSeen time.Time) lipgloss.Style {
 	switch {
 	case lastSeen.IsZero():

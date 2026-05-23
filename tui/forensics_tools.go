@@ -80,9 +80,9 @@ func renderToolsView(tools []analytics.ToolUsage, sessionCountByModel map[string
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// renderToolRow renders a single tool row including indent, type tag,
-// formatted name, proportional bar, count, and percent. The "other"
-// rollup row passes name="other" and gets the dim · tag automatically.
+// renderToolRow renders a single tool row. The "other" rollup row
+// passes name="other" and gets the dim · tag automatically via
+// categorizeTool's default.
 func renderToolRow(name string, count, totalCalls int) string {
 	const (
 		nameColW = 20
@@ -97,7 +97,7 @@ func renderToolRow(name string, count, totalCalls int) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("    ") // 4-sp row indent
+	sb.WriteString("    ")
 	sb.WriteString(tagStyle.Render(fmt.Sprintf("%-4s", tag)))
 	sb.WriteString("  ")
 	sb.WriteString(fmt.Sprintf("%-*s", nameColW, display))
@@ -113,12 +113,8 @@ func renderToolRow(name string, count, totalCalls int) string {
 }
 
 // categorizeTool maps a tool name to its (tag, style) pair for the
-// forensics tools view. The tag is always exactly 4 cells wide once
-// rendered (padded to 4 by the caller via fmt.Sprintf("%-4s", tag)).
-// Unknown tools fall through to ("·", toolTagDimStyle).
-//
-// Adding a new tool category is a single switch entry below plus a
-// matching style in tui/style.go.
+// forensics tools view. Unknown tools fall through to the dim · tag.
+// Adding a category = one switch entry here + matching style in style.go.
 func categorizeTool(name string) (tag string, style lipgloss.Style) {
 	if strings.HasPrefix(name, "mcp__") {
 		return "mcp", toolTagMCPStyle
@@ -137,28 +133,13 @@ func categorizeTool(name string) (tag string, style lipgloss.Style) {
 	return "·", toolTagDimStyle
 }
 
-// formatToolName returns the display form of a tool name for the
-// forensics tools view.
+// formatToolName turns mcp__<server>__<action> into <server>/<action>,
+// collapsing multi-segment servers ("plugin_github_github") to their
+// last _-separated segment. Non-MCP names pass through unchanged.
 //
-// Non-MCP names pass through unchanged.
-//
-// MCP names (mcp__<server>__<action>) are simplified:
-//
-//   - The mcp__ prefix is stripped.
-//   - The server portion is split on "_" and reduced to its LAST
-//     segment. This collapses wrapper-noise like "plugin_github_github"
-//     to "github" while leaving single-segment servers ("semble",
-//     "wiki") untouched.
-//   - The action segment is kept intact.
-//   - The two parts are joined with "/".
-//
-// If the joined form exceeds maxWidth visual cells, the action portion
-// is middle-truncated with "…" while the server portion is preserved.
-// In the edge case where the simplified server alone is >= maxWidth,
-// the server is kept and the action becomes "…" (per spec — the server
-// is never truncated).
-//
-// maxWidth <= 0 disables truncation.
+// When the joined form exceeds maxWidth, the action is middle-truncated
+// with "…" and the server is preserved — never the other way around. A
+// maxWidth of 0 or less disables truncation.
 func formatToolName(name string, maxWidth int) string {
 	if !strings.HasPrefix(name, "mcp__") {
 		return name
@@ -211,22 +192,13 @@ func formatToolName(name string, maxWidth int) string {
 // "█" is rendered separately (see proportionalBar).
 var horizontalBlocks = []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
 
-// proportionalBar returns the bar fill and the trailing padding for a
-// row, sized so fill+track is exactly cellWidth visual cells total.
+// proportionalBar returns the bar fill and the trailing space padding
+// for a row, sized so fill+track is exactly cellWidth visual cells.
+// The caller picks fillStyle — the tools view passes the row's category
+// tag style so tag and bar share a hue.
 //
-// Layout: zero or more "█" cells (rendered via fillStyle) optionally
-// followed by ONE partial-block glyph (same style); the remainder is
-// invisible space padding that preserves column alignment for the
-// downstream count and percent columns. fillStyle is the caller's
-// choice — the tools view passes the row's category tag style so the
-// bar color matches the tag color.
-//
-// Special cases:
-//   - count == 0 (regardless of total): no fill, full-width blank pad.
-//   - count > 0 but ratio rounds to zero cells: a single "▏" fill cell
-//     ("present but tiny" beats invisible).
-//
-// totalCalls == 0 is treated as no-data — same as count == 0.
+// Floors a non-zero count to a single "▏" cell so tiny tools don't
+// disappear. count == 0 or totalCalls == 0 renders no fill at all.
 func proportionalBar(count, totalCalls, cellWidth int, fillStyle lipgloss.Style) (fill, track string) {
 	if cellWidth <= 0 {
 		return "", ""
@@ -274,15 +246,10 @@ func proportionalBar(count, totalCalls, cellWidth int, fillStyle lipgloss.Style)
 	return fill, track
 }
 
-// prettyModelName converts an internal model identifier into a display
-// form: "claude-opus-4-7" → "Opus 4.7", "claude-haiku-4-5-20251001" →
-// "Haiku 4.5". The leading "claude-" is stripped, the family is
-// title-cased, and the first two version segments are joined with ".";
-// any further suffix (date stamps, etc.) is dropped.
-//
-// Falls back to the raw name if the pattern doesn't match — keeps
-// custom or unexpected model identifiers visible rather than mangling
-// them.
+// prettyModelName turns "claude-opus-4-7" into "Opus 4.7" and
+// "claude-haiku-4-5-20251001" into "Haiku 4.5" (date suffix dropped).
+// Non-claude or malformed inputs pass through unchanged so unknown
+// model identifiers stay visible rather than getting mangled.
 func prettyModelName(name string) string {
 	rest, ok := strings.CutPrefix(name, "claude-")
 	if !ok {

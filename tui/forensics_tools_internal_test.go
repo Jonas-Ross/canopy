@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -158,21 +159,13 @@ func TestProportionalBar_cellCounts(t *testing.T) {
 				t.Errorf("has partial = %v, want %v (fill=%q)", gotPart, tt.wantPart, plainFill)
 			}
 			// Total visual cells (fill + track) must always equal width.
-			total := runeCount(plainFill) + runeCount(plainTrack)
+			total := utf8.RuneCountInString(plainFill) + utf8.RuneCountInString(plainTrack)
 			if total != width {
 				t.Errorf("total visual cells = %d, want %d (fill=%q track=%q)",
 					total, width, plainFill, plainTrack)
 			}
 		})
 	}
-}
-
-func runeCount(s string) int {
-	n := 0
-	for range s {
-		n++
-	}
-	return n
 }
 
 func TestPrettyModelName(t *testing.T) {
