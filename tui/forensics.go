@@ -2,9 +2,27 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/jonasross/canopy/analytics"
 )
+
+// loadAnalyticsCmd returns a tea.Cmd that calls analytics.Build
+// asynchronously. On success it dispatches AnalyticsLoadedMsg; on error
+// it dispatches an empty AnalyticsLoadedMsg (the loaded flag is not set
+// and the placeholder view renders until the next refresh).
+func loadAnalyticsCmd(r Refresher, now time.Time) tea.Cmd {
+	return func() tea.Msg {
+		snap, err := analytics.Build(r.SessionStore(), now)
+		if err != nil {
+			return AnalyticsLoadedMsg{}
+		}
+		return AnalyticsLoadedMsg{Snapshot: snap}
+	}
+}
 
 // renderForensicsView renders the forensics tab placeholder: title bar (with
 // forensics active), empty body padded to height, and a minimal footer hint.

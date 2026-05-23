@@ -12,13 +12,21 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonasross/canopy/aggregator"
+	"github.com/jonasross/canopy/analytics"
+	"github.com/jonasross/canopy/sessions"
 )
 
-// Refresher triggers a data refresh. Production passes *aggregator.Aggregator;
-// tests inject a fake.
+// Refresher triggers a data refresh and exposes the session store for
+// analytical queries. Production passes *aggregator.Aggregator; tests
+// inject a fake.
 type Refresher interface {
 	Refresh()
+	SessionStore() *sessions.Store
 }
+
+// AnalyticsLoadedMsg carries the result of an async analytics.Build call.
+// Dispatched when the forensics tab loads or when r is pressed on that tab.
+type AnalyticsLoadedMsg struct{ Snapshot analytics.Snapshot }
 
 // UpdateMsg wraps an aggregator.Update for delivery via tea.Program.Send.
 type UpdateMsg aggregator.Update
@@ -84,6 +92,12 @@ type Model struct {
 	blinkRunning bool
 
 	procsExpanded map[string]bool
+
+	// analytics holds the most recently built analytics snapshot. Populated
+	// asynchronously via loadAnalyticsCmd when the forensics tab is entered
+	// or when r is pressed on that tab.
+	analytics       analytics.Snapshot
+	analyticsLoaded bool
 
 	now func() time.Time
 }
@@ -229,6 +243,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, refreshCmd(m.refresher)
 
+	case AnalyticsLoadedMsg:
+		// Only store the snapshot when it carries data (error path sends
+		// an empty msg; we leave the model unchanged in that case so the
+		// stale snapshot — if any — remains visible and a retry via r
+		// still works).
+		if !msg.Snapshot.GeneratedAt.IsZero() {
+			m.analytics = msg.Snapshot
+			m.analyticsLoaded = true
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -278,6 +303,9 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case keyUp:
 			m = m.moveFocus(-1)
 		case keyRefresh:
+			if m.tab == tabForensics {
+				return m, loadAnalyticsCmd(m.refresher, m.now())
+			}
 			m.refresher.Refresh()
 		case keyFilter:
 			m.mode = modeFiltering
@@ -308,9 +336,9 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Type == tea.KeyTab:
 		if m.tab == tabOperational {
 			m.tab = tabForensics
-		} else {
-			m.tab = tabOperational
+			return m, loadAnalyticsCmd(m.refresher, m.now())
 		}
+		m.tab = tabOperational
 
 	case msg.Type == tea.KeyEsc:
 		m.filterStr = ""

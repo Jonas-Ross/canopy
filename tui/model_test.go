@@ -21,9 +21,16 @@ import (
 // calls so tests can assert the exact count.
 type fakeRefresher struct {
 	calls int
+	store *sessions.Store
 }
 
 func (f *fakeRefresher) Refresh() { f.calls++ }
+
+// SessionStore returns f.store, which may be nil. Tests that exercise
+// the analytics load path must set the store field; tests that only drive
+// the operational tab can leave it nil (loadAnalyticsCmd is never
+// executed in those test paths).
+func (f *fakeRefresher) SessionStore() *sessions.Store { return f.store }
 
 // newBaseWorktree returns a minimal git.Worktree for use in fixtures.
 func newBaseWorktree(path, branch string) git.Worktree {

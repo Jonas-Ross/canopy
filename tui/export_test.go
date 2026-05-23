@@ -2,8 +2,11 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/jonasross/canopy/analytics"
 )
 
 // Test-only seams. Each function here exposes an unexported symbol so
@@ -201,4 +204,29 @@ func SetBlinkPhaseForTest(m tea.Model, phase bool) tea.Model {
 		return mm
 	}
 	return m
+}
+
+// Analytics seams — expose snapshot loading state for test assertions.
+
+// AnalyticsLoaded reports whether the Model has received a successful
+// AnalyticsLoadedMsg. Returns false on a type-assertion miss.
+func AnalyticsLoaded(m tea.Model) bool {
+	if mm, ok := m.(Model); ok {
+		return mm.analyticsLoaded
+	}
+	return false
+}
+
+// AnalyticsSnapshot returns the analytics.Snapshot currently stored on the
+// Model. Returns a zero-value Snapshot on a type-assertion miss.
+func AnalyticsSnapshot(m tea.Model) analytics.Snapshot {
+	if mm, ok := m.(Model); ok {
+		return mm.analytics
+	}
+	return analytics.Snapshot{}
+}
+
+// LoadAnalyticsCmdForTest exposes loadAnalyticsCmd for direct testing.
+func LoadAnalyticsCmdForTest(r Refresher, now func() time.Time) tea.Cmd {
+	return loadAnalyticsCmd(r, now())
 }
