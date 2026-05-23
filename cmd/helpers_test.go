@@ -44,13 +44,3 @@ func assertFrameHasChrome(t *testing.T, label, frame string) {
 	}
 }
 
-// countLines counts the number of lines in frame that contain substr.
-func countLines(frame, substr string) int {
-	n := 0
-	for _, line := range strings.Split(frame, "\n") {
-		if strings.Contains(line, substr) {
-			n++
-		}
-	}
-	return n
-}

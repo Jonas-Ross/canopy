@@ -95,8 +95,12 @@ func TestDemoScript_ProcsCollapseExpand(t *testing.T) {
 	expandedPath := filepath.Join(tmp, "expanded.txt")
 	recollapsedPath := filepath.Join(tmp, "recollapsed.txt")
 	script := filepath.Join(tmp, "procs.txt")
+	// The fixture seeds extra historical sessions on feat/auth, which
+	// adds ~2 rows to the detail pane's Sessions section. The procs
+	// expand affordance still must show ALL 14 procs (no truncation hint);
+	// give the script a taller terminal so the budget honors that invariant.
 	body := "" +
-		"width 140\nheight 40\nwait 200ms\n" +
+		"width 140\nheight 48\nwait 200ms\n" +
 		"keys jj\nresolve\n" +
 		"capture " + collapsedPath + "\n" +
 		"keys P\nresolve\n" +
@@ -139,13 +143,15 @@ func TestDemoScript_ProcsCollapseExpand(t *testing.T) {
 		t.Errorf("collapsed frame missing top claude pid 11201:\n%s", collapsed)
 	}
 
-	// Expanded: more procs visible than collapsed; the budget clamp still
-	// applies when sessions rows consume height, so not all procs may fit.
-	// The invariant is that expanded shows more procs than collapsed (5→12+).
-	collapsedProcs := countLines(collapsed, "zsh")
-	expandedProcs := countLines(expanded, "zsh")
-	if expandedProcs <= collapsedProcs {
-		t.Errorf("expanded procs (%d zsh rows) should exceed collapsed (%d); toggle did not expand:\n%s", expandedProcs, collapsedProcs, expanded)
+	// Expanded: every proc visible (tail row 'Cursor Helper' appears,
+	// '+N more (P)' truncation hint is gone). This is the contract of
+	// the P toggle — pressing P stops hiding things. If a future layout
+	// regression squeezes the panel, this fails loudly.
+	if !strings.Contains(expanded, "Cursor Helper") {
+		t.Errorf("expanded frame missing tail proc 'Cursor Helper' — budget squeezed the list:\n%s", expanded)
+	}
+	if strings.Contains(expanded, "more (P)") {
+		t.Errorf("expanded frame still shows '+N more (P)' truncation hint — toggle did not expand fully:\n%s", expanded)
 	}
 	if !strings.Contains(expanded, "gopls") {
 		t.Errorf("expanded frame missing gopls proc (should be visible when expanded):\n%s", expanded)
