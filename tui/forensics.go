@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -30,23 +31,28 @@ func (v forensicsView) label() string {
 }
 
 // loadAnalyticsCmd returns a tea.Cmd that calls analytics.Build
-// asynchronously. On success it dispatches AnalyticsLoadedMsg; on error
-// or a nil store (test fakes are allowed to return nil from
-// SessionStore) it dispatches an empty AnalyticsLoadedMsg, which the
-// Update handler ignores so the existing snapshot (if any) is preserved.
+// asynchronously. The result rides on AnalyticsLoadedMsg: either
+// Snapshot (success) or Err (failure / nil store). The Update handler
+// surfaces Err as a notice, preserves any previous snapshot, and flips
+// analyticsLoaded so the user moves out of the "loading…" placeholder.
 func loadAnalyticsCmd(r Refresher, now time.Time) tea.Cmd {
 	return func() tea.Msg {
 		store := r.SessionStore()
 		if store == nil {
-			return AnalyticsLoadedMsg{}
+			return AnalyticsLoadedMsg{Err: errNoSessionStore}
 		}
 		snap, err := analytics.Build(store, now)
 		if err != nil {
-			return AnalyticsLoadedMsg{}
+			return AnalyticsLoadedMsg{Err: err}
 		}
 		return AnalyticsLoadedMsg{Snapshot: snap}
 	}
 }
+
+// errNoSessionStore is returned by loadAnalyticsCmd when the Refresher
+// hands back a nil store. Production never hits this (aggregator.New
+// rejects nil), but test fakes can.
+var errNoSessionStore = errors.New("no session store available")
 
 // updateForensicsMode handles key input while on the forensics tab.
 // Digit keys 1-4 jump directly; h/l cycle with wrap-around; r re-triggers

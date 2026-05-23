@@ -1,8 +1,10 @@
 package tui_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +29,7 @@ func newEmptyStore(t *testing.T) *sessions.Store {
 	if err != nil {
 		t.Fatalf("newEmptyStore: sessions.Open: %v", err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
 
@@ -80,15 +83,32 @@ func TestAnalyticsLoadedMsg_storedOnModel(t *testing.T) {
 }
 
 // TestAnalyticsLoadedMsg_emptyNotStored verifies that an empty
-// AnalyticsLoadedMsg (error path — GeneratedAt.IsZero()) does not set
-// analyticsLoaded.
+// AnalyticsLoadedMsg (no Snapshot, no Err — used when nothing real
+// happened) does not set analyticsLoaded.
 func TestAnalyticsLoadedMsg_emptyNotStored(t *testing.T) {
 	m := tui.NewModel(&storeRefresher{store: newEmptyStore(t)})
 
-	m, _ = m.Update(tui.AnalyticsLoadedMsg{}) // zero Snapshot → error path
+	m, _ = m.Update(tui.AnalyticsLoadedMsg{}) // zero Snapshot, nil Err
 
 	if tui.AnalyticsLoaded(m) {
 		t.Error("AnalyticsLoaded = true after empty AnalyticsLoadedMsg, want false")
+	}
+}
+
+// TestAnalyticsLoadedMsg_errorSurfacesAsNotice verifies that an
+// AnalyticsLoadedMsg carrying an Err is surfaced via m.notice AND
+// flips analyticsLoaded so the forensics body moves off "loading…".
+func TestAnalyticsLoadedMsg_errorSurfacesAsNotice(t *testing.T) {
+	m := tui.NewModel(&storeRefresher{store: newEmptyStore(t)})
+
+	m, _ = m.Update(tui.AnalyticsLoadedMsg{Err: errors.New("boom")})
+
+	if !tui.AnalyticsLoaded(m) {
+		t.Error("AnalyticsLoaded should flip on error to clear loading state")
+	}
+	notice := tui.NoticeOf(m)
+	if !strings.Contains(stripANSI(notice), "boom") {
+		t.Errorf("notice missing error message; got %q", notice)
 	}
 }
 

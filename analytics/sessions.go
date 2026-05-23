@@ -10,6 +10,11 @@ import (
 // DESC by UpdatedAt. If the store has fewer than n sessions, all are
 // returned. Each session is Hydrated before being included.
 func RecentSessions(store *sessions.Store, n int) ([]SessionSummary, error) {
+	// Defensive: callers can pass arbitrary n. Negative would slice with
+	// a negative index further down and panic; zero is a no-op.
+	if n <= 0 {
+		return nil, nil
+	}
 	var all []*sessions.Session
 	for sess := range store.Sessions() {
 		all = append(all, sess)

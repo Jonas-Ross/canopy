@@ -25,8 +25,14 @@ type Refresher interface {
 }
 
 // AnalyticsLoadedMsg carries the result of an async analytics.Build call.
-// Dispatched when the forensics tab loads or when r is pressed on that tab.
-type AnalyticsLoadedMsg struct{ Snapshot analytics.Snapshot }
+// Dispatched when the forensics tab loads or when r is pressed on that
+// tab. Exactly one of Snapshot or Err is meaningful per message — on
+// failure the Update handler surfaces Err as a notice and flips
+// analyticsLoaded so the user moves out of the "loading…" placeholder.
+type AnalyticsLoadedMsg struct {
+	Snapshot analytics.Snapshot
+	Err      error
+}
 
 // UpdateMsg wraps an aggregator.Update for delivery via tea.Program.Send.
 type UpdateMsg aggregator.Update
@@ -249,10 +255,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, refreshCmd(m.refresher)
 
 	case AnalyticsLoadedMsg:
-		// Only store the snapshot when it carries data (error path sends
-		// an empty msg; we leave the model unchanged in that case so the
-		// stale snapshot — if any — remains visible and a retry via r
-		// still works).
+		// Error path: surface as a notice and flip analyticsLoaded so the
+		// loading placeholder doesn't sit forever. Keep the previous
+		// snapshot (if any) visible behind the notice. Retry via r.
+		if msg.Err != nil {
+			m.notice = errorStyle.Render("analytics: " + msg.Err.Error())
+			m.analyticsLoaded = true
+			return m, nil
+		}
 		if !msg.Snapshot.GeneratedAt.IsZero() {
 			m.analytics = msg.Snapshot
 			m.analyticsLoaded = true

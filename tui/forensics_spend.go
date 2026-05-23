@@ -37,6 +37,15 @@ func tokenTotal(t sessions.TokenStats) int {
 	return t.Input + t.Output + t.CacheRead + t.CacheCreation
 }
 
+// truncateToDayUTC normalizes t to UTC midnight. Zero-time stays zero.
+func truncateToDayUTC(t time.Time) time.Time {
+	if t.IsZero() {
+		return t
+	}
+	t = t.UTC()
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
+
 // sparkBar returns a sparkline bar of width up to sparkWidth cells,
 // normalized so that the bar with maxTotal fills the entire width.
 // Returns a dim "·" when total == 0.
@@ -87,9 +96,18 @@ func renderSpendView(days []analytics.DayBucket, windowStart, windowEnd time.Tim
 		dayMap[d.Date.Format("2006-01-02")] = d
 	}
 
-	// newest / oldest from the slice (already DESC sorted).
-	newest := days[0].Date
-	oldest := days[len(days)-1].Date
+	// Anchor display range to the requested window — the header reads
+	// "last 30 days", so the table needs to render that range with gap
+	// rows for inactive days. Fall back to activity bounds when the
+	// snapshot didn't populate the window (test fixtures may not).
+	newest := truncateToDayUTC(windowEnd)
+	oldest := truncateToDayUTC(windowStart)
+	if newest.IsZero() {
+		newest = days[0].Date
+	}
+	if oldest.IsZero() {
+		oldest = days[len(days)-1].Date
+	}
 
 	// Find the max total across all active days for sparkline normalization.
 	maxTotal := 0
@@ -111,11 +129,9 @@ func renderSpendView(days []analytics.DayBucket, windowStart, windowEnd time.Tim
 	_ = width // reserved for future column-hiding at narrow widths
 
 	const (
-		dateW    = 10
-		barCol   = sparkWidth + 2 // bar + 2 spaces padding
-		numColW  = 12             // "in 99.9M" fits in 10, pad to 12
+		barCol    = sparkWidth + 2 // bar + 2 spaces padding
+		numColW   = 12             // "in 99.9M" fits in 10, pad to 12
 		cacheColW = 16
-		totalColW = 14
 	)
 
 	var sb strings.Builder

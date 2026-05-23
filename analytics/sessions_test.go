@@ -54,3 +54,20 @@ func TestRecentSessions_fewerThanN(t *testing.T) {
 		t.Errorf("want 1, got %d", len(got))
 	}
 }
+
+func TestRecentSessions_nonPositiveLimitReturnsEmpty(t *testing.T) {
+	// Guards against panic from all[:n] / make(..., 0, n) on negative n,
+	// and treats n == 0 as a degenerate "give me nothing" request.
+	store := newTestStore(t, []sessionSpec{
+		{id: "s1", model: "claude-opus-4-7", started: day(5, 22, 10), updated: day(5, 22, 11)},
+	})
+	for _, n := range []int{0, -1, -100} {
+		got, err := RecentSessions(store, n)
+		if err != nil {
+			t.Errorf("n=%d: unexpected err %v", n, err)
+		}
+		if len(got) != 0 {
+			t.Errorf("n=%d: want empty, got %d rows", n, len(got))
+		}
+	}
+}
