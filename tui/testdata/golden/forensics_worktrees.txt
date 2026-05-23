@@ -1,0 +1,38 @@
+── Canopy ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ops · forensics ──
+
+  spend · sessions · tools · worktrees
+
+  worktree                  sessions  total time  last seen
+  feat+auth                        3      2h 27m  now
+  repo                             3       2h 0m  1m
+  chore+deps                       2      1h 38m  1d
+  fix+login                        0          0m  3d
+  ──────────────────────────────────────────────────────────────
+  total                            8       6h 5m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  [tab] back to ops  ·  [1-4] view  ·  [h/l] prev/next  ·  [r] refresh  ·  [q] quit ───────────────────────────────────────────────────────
