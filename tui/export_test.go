@@ -156,6 +156,28 @@ func NewFormBaseValueOf(m tea.Model) string {
 	return ""
 }
 
+// ForensicsView seams — expose the unexported forensicsView type and constants
+// so forensics_test.go can drive and assert the active sub-view.
+
+// View is the exported alias for the unexported forensicsView type.
+type View = forensicsView
+
+const (
+	ViewSpend     = viewSpend
+	ViewSessions  = viewSessions
+	ViewTools     = viewTools
+	ViewWorktrees = viewWorktrees
+)
+
+// ActiveView returns the active forensics sub-view of a Model.
+// Returns ViewSpend on a type-assertion miss.
+func ActiveView(m tea.Model) View {
+	if mm, ok := m.(Model); ok {
+		return mm.forensicsView
+	}
+	return ViewSpend
+}
+
 // Tab seams — expose the unexported tab type and constants so tui_test can
 // drive and assert the active tab without reaching into unexported fields.
 

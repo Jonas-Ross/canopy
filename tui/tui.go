@@ -93,6 +93,11 @@ type Model struct {
 
 	procsExpanded map[string]bool
 
+	// forensicsView is the active sub-tab within the forensics tab.
+	// Zero value is viewSpend. Persists across tab round-trips so the user
+	// returns to the same sub-view after switching back from ops.
+	forensicsView forensicsView
+
 	// analytics holds the most recently built analytics snapshot. Populated
 	// asynchronously via loadAnalyticsCmd when the forensics tab is entered
 	// or when r is pressed on that tab.
@@ -286,6 +291,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Route forensics-tab keys to the dedicated handler so digit/h/l
+	// bindings never interfere with the operational tab.
+	if m.tab == tabForensics {
+		return m.updateForensicsMode(msg)
+	}
+
 	switch {
 	case msg.Type == tea.KeyCtrlC:
 		return m, tea.Quit
@@ -303,9 +314,6 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case keyUp:
 			m = m.moveFocus(-1)
 		case keyRefresh:
-			if m.tab == tabForensics {
-				return m, loadAnalyticsCmd(m.refresher, m.now())
-			}
 			m.refresher.Refresh()
 		case keyFilter:
 			m.mode = modeFiltering
@@ -334,11 +342,10 @@ func (m Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.moveFocus(-1)
 
 	case msg.Type == tea.KeyTab:
-		if m.tab == tabOperational {
-			m.tab = tabForensics
-			return m, loadAnalyticsCmd(m.refresher, m.now())
-		}
-		m.tab = tabOperational
+		// Only reached when m.tab == tabOperational — forensics Tab is
+		// handled by updateForensicsMode before reaching this switch.
+		m.tab = tabForensics
+		return m, loadAnalyticsCmd(m.refresher, m.now())
 
 	case msg.Type == tea.KeyEsc:
 		m.filterStr = ""
