@@ -80,6 +80,13 @@ func withDefaults(cfg Config) Config {
 	return cfg
 }
 
+// SessionStore returns the session store the aggregator was constructed
+// with. The TUI uses it for analytical queries that are outside the
+// aggregator's per-worktree snapshot.
+func (a *Aggregator) SessionStore() *sessions.Store {
+	return a.cfg.SessionStore
+}
+
 // maxParallelStatus bounds the worktreeStatus fan-out in
 // statusesParallel. Each call shells out 4 git subprocesses; 16
 // keeps a 100-worktree refresh well under a second.
