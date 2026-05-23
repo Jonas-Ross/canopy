@@ -1,0 +1,38 @@
+── Canopy ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ops · forensics ──
+
+  spend · sessions · tools · worktrees
+
+    started   model           worktree            duration     prompts    tools
+  ● 11:15     opus-4-7        feat+auth           45m               12       47
+  ● 11:40     sonnet-4-6      repo                20m                8       22
+    09:00     opus-4-7        chore+deps          1h 00m            18       63
+    07:00     sonnet-4-6      feat+auth           47m                9       31
+    Sun 17    opus-4-7        repo                1h 12m            21       78
+    Sun 17    sonnet-4-6      chore+deps          38m                7       19
+    Sat 16    opus-4-7        feat+auth           55m               14       52
+    Fri 15    sonnet-4-6      repo                28m                5       14
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  [tab] back to ops  ·  [1-4] view  ·  [h/l] prev/next  ·  [r] refresh  ·  [q] quit ───────────────────────────────────────────────────────
